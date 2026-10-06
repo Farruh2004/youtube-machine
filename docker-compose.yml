@@ -1,0 +1,20 @@
+# Server ichida: docker compose up -d
+# Kirish (tavsiya): o'z kompyuteringizdan SSH tunnel —
+#   ssh -L 4300:127.0.0.1:4300 user@SERVER_IP   va brauzerda http://127.0.0.1:4300
+services:
+  youtube-machine:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Faqat serverning o'ziga ochiq; tashqaridan SSH tunnel orqali kiriladi
+      - "127.0.0.1:4300:4300"
+    environment:
+      # Telefondan to'g'ridan-to'g'ri kirmoqchi bo'lsangiz: parol qo'ying va yuqoridagi portni
+      # "4300:4300" ga o'zgartiring (bunda HTTPS uchun Caddy/Cloudflare Tunnel tavsiya etiladi).
+      APP_PASSWORD: ""
+      # Sayt sifatida (domen + HTTPS) ishlatilsa: tashqi manzil. YouTube ulash shu manzilga qaytadi,
+      # Google Cloud'da "Web application" kaliti, redirect: <PUBLIC_URL>/oauth/callback. Batafsil: docs/SAYT-REJASI.md
+      PUBLIC_URL: ""
+      TZ: "Asia/Tashkent"
+    volumes:
+      - ./data:/data

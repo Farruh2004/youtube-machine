@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YouTube Machine</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%238b5cf6'/><path d='M12 9l12 7-12 7z' fill='white'/></svg>">
+  <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <meta name="theme-color" content="#8b5cf6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="YT Machine">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo">▶</span><span>YouTube Machine</span></div>
+      <nav id="nav">
+        <a href="#/" data-route="dashboard">📊 Boshqaruv paneli</a>
+        <a href="#/new" data-route="new">➕ Yangi video</a>
+        <a href="#/batch" data-route="batch">📦 Ko‘plab yuklash</a>
+        <a href="#/highlights" data-route="highlights">🔎 Lavha topish</a>
+        <a href="#/projects" data-route="projects">🎬 Loyihalar</a>
+        <a href="#/schedule" data-route="schedule">📅 Chiqarish jadvali</a>
+        <a href="#/diagnose" data-route="diagnose">🩺 Kanal tashxisi</a>
+        <a href="#/competitors" data-route="competitors">🕵️ Raqobatchilar</a>
+        <a href="#/ideas" data-route="ideas">💡 G‘oyalar va ssenariy</a>
+        <a href="#/analytics" data-route="analytics">📈 Analiz</a>
+        <a href="#/costs" data-route="costs">💵 Xarajatlar</a>
+        <a href="#/keys" data-route="keys">🔑 API kalitlar</a>
+        <a href="#/settings" data-route="settings">⚙️ Sozlamalar</a>
+      </nav>
+      <div class="sidebar-foot" id="queue-status"></div>
+    </aside>
+    <main id="main" tabindex="-1"></main>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

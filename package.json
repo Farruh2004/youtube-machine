@@ -1,0 +1,14 @@
+{
+  "name": "youtube-machine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Overtone AI va FIGHTDOMAIN kanallari uchun avtomatik YouTube ishlab chiqarish dasturi (lokal).",
+  "type": "module",
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.js"
+  }
+}
