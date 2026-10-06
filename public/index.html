@@ -10,6 +10,14 @@
   <meta name="theme-color" content="#8b5cf6">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="YT Machine">
+  <script>
+    // Mavzu va til sahifa chizilishidan oldin qo'yiladi (miltillamasin)
+    try {
+      const th = localStorage.getItem('ytm-theme');
+      if (th === 'light' || th === 'dark') document.documentElement.dataset.theme = th;
+      document.documentElement.lang = localStorage.getItem('ytm-lang') || 'uz';
+    } catch {}
+  </script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -32,6 +40,14 @@
         <a href="#/settings" data-route="settings">⚙️ Sozlamalar</a>
       </nav>
       <div class="sidebar-foot" id="queue-status"></div>
+      <div class="prefs" data-no-i18n>
+        <select id="lang-pick" aria-label="Til / Language / Язык">
+          <option value="uz">🇺🇿 O‘zbek</option>
+          <option value="en">🇬🇧 English</option>
+          <option value="ru">🇷🇺 Русский</option>
+        </select>
+        <button type="button" id="theme-pick" title="Kun / tun"></button>
+      </div>
     </aside>
     <main id="main" tabindex="-1"></main>
   </div>

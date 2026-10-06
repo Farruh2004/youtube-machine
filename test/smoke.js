@@ -170,6 +170,13 @@ const { startTelegram } = await import('../src/telegram.js');
 startTelegram();
 
 // --- Kichik birlik testlari ---
+// Interfeys tarjimalari: har tarjimada raqam o'rinlari ({0}, {1}) o'zbekcha bilan bir xil
+const { EN, RU } = await import('../public/i18n-dict.js');
+const placeholders = (x) => (x.match(/\{\d+\}/g) || []).sort().join();
+for (const [k, v] of Object.entries(EN)) {
+  assert.equal(placeholders(v), placeholders(k), `EN tarjima: ${k}`);
+  assert.equal(placeholders(RU[k] ?? ''), placeholders(k), `RU tarjima: ${k}`);
+}
 assert.equal(isLrc('[00:01.00] a\n[00:05.50] b'), true);
 assert.deepEqual(parseLrc('[00:05.50] b\n[00:01.00] a').map((x) => x.t), [1, 5.5]);
 assert.deepEqual(cleanLyrics('[Verse]\nhello\n\n(Chorus)\nworld'), ['hello', 'world']);

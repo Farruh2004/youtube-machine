@@ -1,4 +1,5 @@
 // YouTube Machine — boshqaruv oynasi (kutubxonasiz, oddiy JavaScript)
+import { startI18n, getLang, setLang, t } from './i18n.js';
 
 const main = document.getElementById('main');
 let pollTimer = null;
@@ -212,7 +213,7 @@ views.dashboard = async () => {
             <p class="sub">${TYPE_DESC[ch.type]?.[0] || ''}</p>
             <p>Keyingi bo‘sh slot: <b>${fmtDate(ch.nextSlot)}</b></p>
             ${ch.diagnosis ? `<p><a href="#/diagnose?channel=${ch.id}">🩺 Tashxis: <b>${ch.diagnosis.score}/100</b> · 📉 ${ch.diagnosis.flop} ta uchmagan · 🚀 ${ch.diagnosis.hit} ta uchgan</a> <span class="help">(${fmtDate(ch.diagnosis.at, false)})</span></p>` : `<p><a href="#/diagnose?channel=${ch.id}">🩺 Kanal tashxisini o‘tkazish →</a></p>`}
-            <a class="btn" href="#/new?channel=${ch.id}">➕ ${esc(ch.name)} uchun video</a>
+            <a class="btn" href="#/new?channel=${ch.id}">➕ Yangi video: ${esc(ch.name)}</a>
           </div>`).join('')}
       </div>
       <div class="card"><h2>So‘nggi loyihalar</h2>${projectTable(d.recent, d.channels)}</div>`;
@@ -2656,6 +2657,37 @@ views.settings = async (parts, query) => {
     }),
   );
 };
+
+// ---------- Til va kun/tun ----------
+const langPick = document.getElementById('lang-pick');
+langPick.value = getLang();
+langPick.addEventListener('change', () => setLang(langPick.value));
+const THEMES = ['auto', 'light', 'dark'];
+const THEME_ICON = { auto: '🌓', light: '☀️', dark: '🌙' };
+const themeBtn = document.getElementById('theme-pick');
+const applyTheme = (th) => {
+  if (th === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = th;
+  themeBtn.textContent = THEME_ICON[th];
+  themeBtn.title = t({ auto: 'Avto (tizim bo‘yicha)', light: 'Kunduzgi', dark: 'Tungi' }[th]);
+};
+let theme = 'auto';
+try {
+  theme = localStorage.getItem('ytm-theme') || 'auto';
+} catch {
+  // xotira yopiq
+}
+applyTheme(theme);
+themeBtn.addEventListener('click', () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  try {
+    localStorage.setItem('ytm-theme', theme);
+  } catch {
+    // xotira yopiq
+  }
+  applyTheme(theme);
+});
+startI18n();
 
 window.addEventListener('hashchange', render);
 render();

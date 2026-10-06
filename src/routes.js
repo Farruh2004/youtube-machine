@@ -121,7 +121,7 @@ function setupChecklist() {
       : []),
     { key: 'google', label: 'Google OAuth mijozi (YouTube’ga yuklash)', ok: Boolean(s.googleClientId && s.googleClientSecret), hint: 'API kalitlar sahifasi' },
     { key: 'telegram', label: 'Telegram bot ulangan (ixtiyoriy)', ok: Boolean(s.telegramToken && s.telegramChatId), hint: 'API kalitlar sahifasi' },
-    ...db().channels.map((c) => ({ key: `yt-${c.id}`, label: `${c.name} YouTube’ga ulangan`, ok: Boolean(c.youtube?.refreshToken && !c.youtube.expired), hint: 'API kalitlar → Google OAuth' })),
+    ...db().channels.map((c) => ({ key: `yt-${c.id}`, label: `${c.name}: YouTube’ga ulangan`, ok: Boolean(c.youtube?.refreshToken && !c.youtube.expired), hint: 'API kalitlar → Google OAuth' })),
   ];
 }
 

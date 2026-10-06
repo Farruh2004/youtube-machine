@@ -14,8 +14,9 @@
   color-scheme: dark;
 }
 
+/* Kunduzgi rejim: tizim sozlamasi bo'yicha (auto) yoki qo'lda tanlangan (data-theme) */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     --bg: #f4f5fa;
     --panel: #ffffff;
     --panel-2: #eef0f7;
@@ -24,6 +25,15 @@
     --muted: #5d6480;
     color-scheme: light;
   }
+}
+:root[data-theme="light"] {
+  --bg: #f4f5fa;
+  --panel: #ffffff;
+  --panel-2: #eef0f7;
+  --border: #d9dceb;
+  --text: #161a2b;
+  --muted: #5d6480;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -192,3 +202,8 @@ tr.click:hover td { background: var(--panel-2); }
 .wizard li { margin-bottom: 8px; }
 .dropzone { display: block; margin-top: 8px; padding: 18px; text-align: center; border: 2px dashed var(--border); border-radius: 10px; cursor: pointer; font-weight: 600; }
 .dropzone.over, .dropzone:hover { border-color: var(--accent, #8b5cf6); }
+
+/* Til va kun/tun tanlovi (yon panel pastida) */
+.prefs { display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.prefs select { width: auto; padding: 4px 8px; font-size: 13px; }
+.prefs button { padding: 4px 10px; font-size: 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
