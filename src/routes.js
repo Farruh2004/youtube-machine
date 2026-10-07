@@ -864,6 +864,7 @@ route('GET', '/api/keys', () => ({
   checks: keyChecks(),
   channels: db().channels.map(publicChannel),
   redirectUri: REDIRECT_URI,
+  serverMode: SERVER_MODE,
 }));
 
 route('POST', '/api/keys/:service/verify', async (req, { service }) => {
@@ -968,6 +969,9 @@ function serveFile(req, res, file) {
 }
 
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
+// Sayt rejimi: dastur faqat gateway orqali ochiladi (gateway foydalanuvchini tekshirib, so'rovni shu maxfiy belgi bilan yuboradi)
+const GATEWAY_SECRET = process.env.GATEWAY_SECRET || '';
+export const SERVER_MODE = Boolean(GATEWAY_SECRET || PUBLIC_URL);
 
 /**
  * Kirish nazorati.
@@ -977,6 +981,13 @@ const APP_PASSWORD = process.env.APP_PASSWORD || '';
 function authorize(req, res) {
   const origin = req.headers.origin;
   const host = req.headers.host || '';
+  if (GATEWAY_SECRET) {
+    const got = crypto.createHash('sha256').update(String(req.headers['x-gateway-secret'] || '')).digest();
+    const want = crypto.createHash('sha256').update(GATEWAY_SECRET).digest();
+    if (!crypto.timingSafeEqual(got, want)) throw new HttpError(403, 'Ruxsat yo‘q');
+    if (origin && PUBLIC_URL && origin !== new URL(PUBLIC_URL).origin) throw new HttpError(403, 'Ruxsat yo‘q');
+    return true;
+  }
   if (APP_PASSWORD) {
     if (origin && origin.replace(/^https?:\/\//, '') !== host) throw new HttpError(403, 'Ruxsat yo‘q');
     const [scheme, encoded] = String(req.headers.authorization || '').split(' ');

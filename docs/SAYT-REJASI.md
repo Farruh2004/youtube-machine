@@ -1,7 +1,7 @@
 # YouTube Machine — sayt (ko‘p foydalanuvchili) versiyasi rejasi
 
-Hozirgi holat: har kim dasturni o‘z kompyuteriga yuklab oladi va o‘z kalitlari bilan ishlatadi.
-Bu hujjat keyingi bosqich — **odamlar saytga kirib ishlatadigan** versiya uchun tayyor reja.
+**Holat:** 1-bosqich bajarildi — `gateway/` (ro‘yxat, kirish, admin, har foydalanuvchiga alohida nusxa) va Docker + Caddy (HTTPS).
+O‘rnatish: [`docs/SAYT-ORNATISH.md`](SAYT-ORNATISH.md). Keyingi bosqichlar: to‘lov, umumiy Google ilova, har nusxani alohida konteynerda ishlatish.
 
 ## 1. Hozir allaqachon tayyor bo‘lgan narsalar
 

@@ -2148,13 +2148,15 @@ views.keys = async (parts, query) => {
           <li><a class="btn small" target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/audience">3. “Publish app” ↗</a>
             <div class="help">“Publish app” → Confirm. Bu bo‘lmasa, ulanish har 7 kunda o‘chadi.</div></li>
           <li><a class="btn small" target="_blank" rel="noopener" href="https://console.cloud.google.com/auth/clients/create">4. Kalit yaratish ↗</a>
-            <div class="help">Application type: <b>Desktop app</b> → Create → <b>Download JSON</b>.</div></li>
+            ${data.serverMode
+              ? `<div class="help">Application type: <b>Web application</b> → “Authorized redirect URIs” → <b>+ Add URI</b> → <code>${esc(data.redirectUri)}</code> → Create → <b>Download JSON</b>.</div>`
+              : '<div class="help">Application type: <b>Desktop app</b> → Create → <b>Download JSON</b>.</div>'}</li>
         </ol>
         <label class="dropzone" id="google-json-drop">📄 Yuklab olingan JSON faylni shu yerga tashlang yoki bosib tanlang
           <input type="file" accept=".json,application/json" id="google-json" hidden></label>
         <div class="help">Hamma qadamlar <b>bitta</b> Google akkaunt va <b>bitta</b> loyihada bo‘lsin (sahifa tepasidagi loyiha nomiga qarang).</div>
       </div>
-      <div class="help" style="margin-top:8px">Redirect URI (Desktop app uchun alohida kiritish shart emas): <code>${esc(data.redirectUri)}</code></div>
+      <div class="help" style="margin-top:8px">${data.serverMode ? 'Redirect URI (Web application kalitiga qo‘shing)' : 'Redirect URI (Desktop app uchun alohida kiritish shart emas)'}: <code>${esc(data.redirectUri)}</code></div>
       <div style="margin-top:10px">${data.channels.map((c) => `
         <div class="row" style="justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)">
           <span><span class="dot" style="background:${esc(c.colors.primary)}"></span><b>${esc(c.name)}</b>
@@ -2248,7 +2250,8 @@ views.keys = async (parts, query) => {
       const j = JSON.parse(await file.text());
       const c = j.installed || j.web || j;
       if (!c.client_id || !c.client_secret) throw new Error('Bu faylda Client ID topilmadi — Google Cloud → Clients’dan “Download JSON” qiling.');
-      if (j.web) toast('Bu “Web application” kaliti. Ishlamasa, “Desktop app” turida yangisini yarating.', 'bad');
+      if (j.web && !data.serverMode) toast('Bu “Web application” kaliti. Ishlamasa, “Desktop app” turida yangisini yarating.', 'bad');
+      if (j.installed && data.serverMode) toast('Bu “Desktop app” kaliti — saytda “Web application” turidagi kalit kerak.', 'bad');
       await api('PUT', '/api/settings', { googleClientId: c.client_id, googleClientSecret: c.client_secret });
       const r = await api('POST', '/api/keys/google/verify');
       toast(r.ok ? 'Google kaliti saqlandi ✓ Endi kanallarni ulang' : r.detail, r.ok ? 'ok' : 'bad');
@@ -2688,6 +2691,15 @@ themeBtn.addEventListener('click', () => {
   applyTheme(theme);
 });
 startI18n();
+
+// Sayt rejimida (gateway orqali) — hisob va chiqish tugmasi
+fetch('/gw/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
+  if (!me?.email) return;
+  const box = document.createElement('div');
+  box.className = 'account';
+  box.innerHTML = `<span class="help" data-no-i18n>${esc(me.email)}</span>${me.admin ? ' <a href="/gw/admin">Admin</a>' : ''} <a href="/gw/logout">Chiqish</a>`;
+  document.querySelector('.prefs')?.after(box);
+}).catch(() => {});
 
 window.addEventListener('hashchange', render);
 render();

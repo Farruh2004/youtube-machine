@@ -261,6 +261,12 @@ youtube-machine/
 - TikTok va Instagram’ga to‘g‘ridan-to‘g‘ri joylash (platformalar ruxsati olingach)
 - Bir xil kontentning ikkita sarlavha yoki prevyu variantini sinash (A/B test)
 
+## Sayt sifatida (ko‘p foydalanuvchi)
+
+Dasturni o‘z serveringizda sayt qilib ochish mumkin: odamlar ro‘yxatdan o‘tadi, har biri o‘z kanallari va o‘z kalitlari bilan ishlaydi
+(har foydalanuvchiga alohida nusxa, ma’lumotlar bir-biridan ajratilgan). O‘rnatish — [`docs/SAYT-ORNATISH.md`](docs/SAYT-ORNATISH.md),
+keyingi bosqichlar rejasi — [`docs/SAYT-REJASI.md`](docs/SAYT-REJASI.md). Mahalliy sinov: `npm run site` → http://127.0.0.1:8080
+
 ## Litsenziya
 
 [MIT](LICENSE) — bepul ishlatish, o‘zgartirish va tarqatish mumkin; muallif ko‘rsatilishi shart.

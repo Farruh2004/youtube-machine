@@ -1,0 +1,41 @@
+# YouTube Machine — sayt (ko'p foydalanuvchili) rejimi.
+# Sozlash: .env faylini to'ldiring (.env.example dan nusxa), so'ng:  docker compose -f docker-compose.site.yml up -d
+# Batafsil: docs/SAYT-ORNATISH.md
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    command: ["node", "gateway/server.js"]
+    environment:
+      GW_PORT: "8080"
+      GW_DATA: /data-site
+      PUBLIC_URL: "https://${DOMAIN}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL}"
+      INVITE_CODE: "${INVITE_CODE:-}"
+      ALLOW_SIGNUP: "${ALLOW_SIGNUP:-1}"
+      MAX_USERS: "${MAX_USERS:-0}"
+      TZ: "${TZ:-Asia/Tashkent}"
+    volumes:
+      - ./data-site:/data-site
+    # Tashqariga ochilmaydi: faqat Caddy orqali (HTTPS)
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - gateway
+
+volumes:
+  caddy-data:
+  caddy-config:

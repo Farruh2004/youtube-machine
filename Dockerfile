@@ -1,6 +1,7 @@
 # YouTube Machine — bulut serverida (VPS) ishlatish uchun.
 # Qurish:   docker build -t youtube-machine .
 # Ishlatish: docker compose up -d   (docker-compose.yml ga qarang)
+# Sayt (ko'p foydalanuvchi): docker compose -f docker-compose.site.yml up -d   (docs/SAYT-ORNATISH.md)
 FROM node:22-bookworm-slim
 
 # ffmpeg + lotin va arab yozuvi uchun shriftlar (subtitrlar shu shriftlar bilan chiziladi)
@@ -12,6 +13,7 @@ WORKDIR /app
 COPY package.json server.js ./
 COPY src ./src
 COPY public ./public
+COPY gateway ./gateway
 
 ENV HOST=0.0.0.0 \
     PORT=4300 \

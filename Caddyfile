@@ -1,0 +1,16 @@
+# HTTPS sertifikati avtomatik olinadi (Let's Encrypt). DOMAIN .env faylidan keladi.
+{$DOMAIN} {
+	encode gzip
+	# Katta video yuklash uchun cheklov yo'q; uzoq montaj so'rovlari uchun kutish vaqti katta
+	reverse_proxy gateway:8080 {
+		transport http {
+			read_timeout 30m
+			write_timeout 30m
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+	}
+}

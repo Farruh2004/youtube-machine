@@ -207,3 +207,4 @@ tr.click:hover td { background: var(--panel-2); }
 .prefs { display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
 .prefs select { width: auto; padding: 4px 8px; font-size: 13px; }
 .prefs button { padding: 4px 10px; font-size: 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.account { margin-top: 8px; font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

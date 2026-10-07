@@ -9,6 +9,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js",
+    "test:site": "node test/gateway.js",
+    "site": "node gateway/server.js"
   }
 }
