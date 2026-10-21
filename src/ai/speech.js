@@ -11,12 +11,49 @@ export function speechReady() {
   return Boolean(db().settings.openaiKey);
 }
 
-/** Diktor ovozi uchun: tanlangan provayder (OpenAI yoki ElevenLabs) sozlanganmi. */
+/** Diktor ovozi uchun: tanlangan provayder (OpenAI, ElevenLabs, Gemini yoki Azure) sozlanganmi. */
 export function ttsReady() {
   const s = db().settings;
   if (s.ttsProvider === 'elevenlabs') return Boolean(s.elevenKey && s.elevenVoiceId);
   if (s.ttsProvider === 'gemini') return Boolean(s.geminiKey);
+  if (s.ttsProvider === 'azure') return Boolean(s.azureSpeechKey && s.azureSpeechRegion && s.azureVoice);
   return Boolean(s.openaiKey);
+}
+
+/** Ovoz keshi uchun belgi: provayder yoki ovoz o'zgarsa, ovoz qayta yaratiladi. */
+export function voiceKey(s) {
+  return (
+    { elevenlabs: `eleven:${s.elevenVoiceId}`, gemini: `gemini:${s.geminiVoice}`, azure: `azure:${s.azureVoice}|${s.azureRate || ''}` }[s.ttsProvider] ||
+    `openai:${s.ttsVoice}`
+  );
+}
+
+export const ttsName = (s) => ({ elevenlabs: 'ElevenLabs', gemini: 'Google AI Studio', azure: 'Azure Speech' })[s.ttsProvider] || 'OpenAI TTS';
+
+// Azure Speech (Microsoft): Edge'dagi ovozlarning rasmiy yo'li. Bepul tarif — oyiga 500 ming belgi.
+export const azureBase = (region) => process.env.AZURE_TTS_BASE || `https://${encodeURIComponent(region)}.tts.speech.microsoft.com`;
+const xml = (t) => String(t).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[c]);
+
+async function azureSpeech(s, text) {
+  const voice = s.azureVoice;
+  const locale = /^([a-z]{2,3}-[A-Z]{2})/.exec(voice)?.[1] || 'en-US';
+  const rate = /^[+-]\d{1,2}%$/.test(s.azureRate || '') ? s.azureRate : '+0%';
+  const ssml = `<speak version='1.0' xml:lang='${locale}' xmlns='http://www.w3.org/2001/10/synthesis'><voice name='${xml(voice)}'><prosody rate='${rate}'>${xml(text)}</prosody></voice></speak>`;
+  const res = await fetch(`${azureBase(s.azureSpeechRegion)}/cognitiveservices/v1`, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': s.azureSpeechKey,
+      'Content-Type': 'application/ssml+xml',
+      'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+      'User-Agent': 'youtube-machine',
+    },
+    body: ssml,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`Azure ovoz: ${res.status === 401 ? 'kalit yoki region noto‘g‘ri' : msg.slice(0, 200) || res.status}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
 }
 
 export const GEMINI_VOICES = ['Puck', 'Kore', 'Charon', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
@@ -97,6 +134,7 @@ export async function synthesize(text, outFile, { instructions = '', cost = {} }
   for (let i = 0; i < chunks.length; i++) {
     const part = path.join(dir, `voice-part-${i}.mp3`);
     if (s.ttsProvider === 'gemini') await geminiSpeech(s, chunks[i], instructions, part);
+    else if (s.ttsProvider === 'azure') fs.writeFileSync(part, await azureSpeech(s, chunks[i]));
     else fs.writeFileSync(part, await ttsChunk(s, chunks[i], instructions));
     parts.push(part);
   }
@@ -104,8 +142,9 @@ export async function synthesize(text, outFile, { instructions = '', cost = {} }
     // ~15 belgi/soniya nutq
     addCost({ kind: 'voice', amount: (text.length / 15 / 60) * (Number(s.prices.geminiTtsPerMin) || 0), note: `${text.length} belgi (Gemini ${s.geminiVoice || 'Puck'})`, ...cost });
   } else {
-    const per1M = s.ttsProvider === 'elevenlabs' ? s.prices.elevenPer1MChars : s.prices.ttsPer1MChars;
-    addCost({ kind: 'voice', amount: (text.length / 1e6) * per1M, note: `${text.length} belgi (${s.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI'})`, ...cost });
+    const per1M = { elevenlabs: s.prices.elevenPer1MChars, azure: Number(s.prices.azurePer1MChars) || 0 }[s.ttsProvider] ?? s.prices.ttsPer1MChars;
+    const name = { elevenlabs: 'ElevenLabs', azure: `Azure ${s.azureVoice}` }[s.ttsProvider] || 'OpenAI';
+    addCost({ kind: 'voice', amount: (text.length / 1e6) * per1M, note: `${text.length} belgi (${name})`, ...cost });
   }
 
   if (parts.length === 1) {

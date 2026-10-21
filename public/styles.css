@@ -183,7 +183,8 @@ tr.click:hover td { background: var(--panel-2); }
 .char-preview.empty { display: flex; align-items: center; justify-content: center; color: #888; font-size: 13px; }
 .scenes { display: grid; gap: 12px; margin-top: 10px; }
 .scene { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; }
-.scene img, .scene-ph { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #fff; border-radius: 8px; display: block; }
+.scene img, .scene video, .scene-ph { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #fff; border-radius: 8px; display: block; }
+.scene video { background: #000; object-fit: cover; }
 .scene-ph { display: flex; align-items: center; justify-content: center; color: #888; border: 1px dashed var(--border); background: transparent; }
 .scene label { margin-top: 0; }
 .scene textarea + label { margin-top: 8px; }

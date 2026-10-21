@@ -27,6 +27,18 @@ export const DEFAULT_SETTINGS = {
   ttsProvider: 'openai',
   geminiTtsModel: 'gemini-2.5-flash-preview-tts',
   geminiVoice: 'Puck',
+  // Azure Speech (Microsoft ovozlari, o'zbekcha ham): portal.azure.com -> Speech service -> Keys and Endpoint
+  azureSpeechKey: '',
+  azureSpeechRegion: '',
+  azureVoice: 'en-US-AndrewMultilingualNeural',
+  azureRate: '+0%',
+  // Boshqa OpenAI-mos AI (DeepSeek, OpenRouter, Groq, Ollama, Qwen, Kimi...): manzil, kalit, model
+  compatBaseUrl: '',
+  compatKey: '',
+  compatModel: '',
+  // Stok video (bepul): pexels.com/api, pixabay.com/api/docs
+  pexelsKey: '',
+  pixabayKey: '',
   elevenKey: '',
   elevenVoiceId: '',
   elevenModel: 'eleven_multilingual_v2',
@@ -60,6 +72,8 @@ export const DEFAULT_SETTINGS = {
     geminiTtsPerMin: 0.015,
     // ElevenLabs ovoz effekti (bitta, ~2 s)
     elevenSfx: 0.02,
+    // Azure ovozi: bepul tarifda oyiga 500 ming belgigacha 0; undan keyin ~16
+    azurePer1MChars: 0,
   },
   // Montaj
   renderPreset: 'veryfast',

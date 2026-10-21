@@ -292,9 +292,12 @@ views.new = async (parts, query) => {
 
   const explainerForm = () => {
     const long = (current.defaultFormat || 'long') === 'long';
+    const stock = current.visualSource === 'stock';
     return `
     <div class="row" style="align-items:flex-start;gap:16px">
-      ${current.characterFile
+      ${stock
+        ? '<div class="alert" style="flex:1;margin:0">📹 Bu kanal stok videolar bilan ishlaydi: har sahnaga Pexels/Pixabay’dan mavzuga mos HD klip olinadi. Personaj kerak emas.</div>'
+        : current.characterFile
         ? `<img src="${characterUrl(current)}" alt="Personaj" class="char-preview">`
         : '<div class="alert warn" style="flex:1;margin:0">Kanal personaji hali yuklanmagan. Pastda shu video uchun yuklang yoki <a href="#/settings">Sozlamalar</a>da kanalga bir marta yuklab qo‘ying.</div>'}
       <div style="flex:1;min-width:220px">
@@ -311,11 +314,16 @@ views.new = async (parts, query) => {
     <div class="grid grid-2">
       <div><label>Uzun video davomiyligi (daqiqa)</label><input name="targetMinutes" type="number" min="1" max="15" step="0.5" value="4"></div>
       <div><label>Shorts davomiyligi (soniya)</label><input name="targetSeconds" type="number" min="15" max="170" value="${esc(current.shortsSeconds || 50)}"></div>
+      <div><label>Sahna tasvirlari</label><select name="visualSource">
+        <option value="character" ${stock ? '' : 'selected'}>🎨 AI rasm (personaj bilan)</option>
+        <option value="stock" ${stock ? 'selected' : ''}>📹 Stok videolar (Pexels / Pixabay, bepul)</option></select></div>
+      <div><label>Nechta variant</label><select name="variants">${[1, 2, 3, 4, 5].map((n) => `<option value="${n}">${n === 1 ? '1 ta video' : `${n} ta — har biri boshqa boshlanish va burchakdan`}</option>`).join('')}</select>
+        <div class="help">Bir mavzudan bir nechta xil video: eng yaxshisini tanlaysiz yoki hammasini turli kunlarga qo‘yasiz.</div></div>
     </div>
-    <details style="margin-top:12px"><summary><b>📁 Tayyor materiallarim bor (ChatGPT rasmlari, AI Studio ovozi)</b></summary>
-      <div class="help" style="margin-top:6px">Rasm va ovozlarni o‘zingiz yasagan bo‘lsangiz — shu yerga tashlang, dastur ularni yig‘ib, yorliq, subtitr, effekt va musiqa qo‘shadi. Fayllar <b>nomi bo‘yicha</b> tartiblanadi (1.png, 2.png, …). Pastdagi “O‘z ssenariyingiz”ga matnni har sahnani yangi qatordan yozing — subtitr shundan olinadi.</div>
+    <details style="margin-top:12px"><summary><b>📁 Tayyor materiallarim bor (ChatGPT rasmlari, AI Studio ovozi, video kliplar)</b></summary>
+      <div class="help" style="margin-top:6px">Rasm, video klip va ovozlarni o‘zingiz yasagan bo‘lsangiz — shu yerga tashlang, dastur ularni yig‘ib, yorliq, subtitr, effekt va musiqa qo‘shadi. Fayllar <b>nomi bo‘yicha</b> tartiblanadi (1.png, 2.mp4, …). Pastdagi “O‘z ssenariyingiz”ga matnni har sahnani yangi qatordan yozing — subtitr shundan olinadi.</div>
       <div class="grid grid-2">
-        <div><label>Sahna rasmlari (bir nechta)</label><input type="file" name="importImages" accept=".png,.jpg,.jpeg,.webp" multiple></div>
+        <div><label>Sahna rasmlari yoki videolari (bir nechta)</label><input type="file" name="importImages" accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm,.mkv" multiple></div>
         <div><label>Ovoz: bitta umumiy yoki har sahnaga bittadan</label><input type="file" name="importVoices" accept=".mp3,.wav,.m4a,.ogg,.flac" multiple>
           <div class="help">Bitta fayl bo‘lsa, dastur uni sahnalarga o‘zi taqsimlaydi.</div></div>
       </div>
@@ -365,35 +373,46 @@ views.new = async (parts, query) => {
     const fd = new FormData(form);
     const inputs = {};
     for (const k of ['songTitle', 'genre', 'mood', 'lyricsLanguage', 'lyrics', 'fighters', 'event', 'notes', 'idea', 'ownScript', 'targetMinutes', 'targetSeconds']) if (fd.has(k)) inputs[k] = fd.get(k);
+    if (fd.has('visualSource')) inputs.visualSource = fd.get('visualSource');
     const importImages = fd.getAll('importImages').filter((f) => f.size).sort(byName);
     const importVoices = fd.getAll('importVoices').filter((f) => f.size).sort(byName);
-    if (current.type === 'explainer' && !current.characterFile && !fd.get('character')?.size && !importImages.length) {
-      toast('Personaj rasmini yuklang (shu yerda yoki Sozlamalarda)', 'bad');
+    if (current.type === 'explainer' && inputs.visualSource !== 'stock' && !current.characterFile && !fd.get('character')?.size && !importImages.length) {
+      toast('Personaj rasmini yuklang (shu yerda yoki Sozlamalarda) yoki “Stok videolar”ni tanlang', 'bad');
       return;
     }
+    // Tayyor materiallar bitta videoga tegishli — ular bilan variant yaratilmaydi
+    const variants = importImages.length || importVoices.length ? 1 : Math.max(1, Math.min(5, Number(fd.get('variants')) || 1));
     btn.disabled = true;
     let project;
     try {
-      project = await api('POST', '/api/projects', { channelId: current.id, format: fd.get('format'), inputs });
-      for (const field of ['audio', 'cover', 'bgvideo', 'clip', 'voice', 'character', 'music']) {
-        const file = fd.get(field);
-        if (file && file.size) {
-          await uploadFile(project.id, field, file, (pct) => {
-            progress.textContent = `${file.name} yuklanmoqda… ${pct}%`;
-          });
+      for (let v = 0; v < variants; v++) {
+        const tag = variants > 1 ? ` (${v + 1}/${variants})` : '';
+        project = await api('POST', '/api/projects', {
+          channelId: current.id,
+          format: fd.get('format'),
+          ...(variants > 1 ? { title: `${String(inputs.idea || '').slice(0, 70)} · ${v + 1}-variant` } : {}),
+          inputs: { ...inputs, ...(variants > 1 ? { variant: v } : {}) },
+        });
+        for (const field of ['audio', 'cover', 'bgvideo', 'clip', 'voice', 'character', 'music']) {
+          const file = fd.get(field);
+          if (file && file.size) {
+            await uploadFile(project.id, field, file, (pct) => {
+              progress.textContent = `${file.name}${tag} yuklanmoqda… ${pct}%`;
+            });
+          }
         }
-      }
-      for (const [kind, files] of [['image', importImages], ['voice', importVoices]]) {
-        for (const [i, file] of files.entries()) {
-          await putFile(`/api/projects/${project.id}/import?kind=${kind}&name=${encodeURIComponent(file.name)}`, file, (pct) => {
-            progress.textContent = `${kind === 'image' ? 'Rasm' : 'Ovoz'} ${i + 1}/${files.length}: ${pct}%`;
-          });
+        for (const [kind, files] of [['image', importImages], ['voice', importVoices]]) {
+          for (const [i, file] of files.entries()) {
+            await putFile(`/api/projects/${project.id}/import?kind=${kind}&name=${encodeURIComponent(file.name)}`, file, (pct) => {
+              progress.textContent = `${kind === 'image' ? 'Rasm/video' : 'Ovoz'} ${i + 1}/${files.length}: ${pct}%`;
+            });
+          }
         }
+        progress.textContent = `Navbatga qo‘yilmoqda…${tag}`;
+        await api('POST', `/api/projects/${project.id}/run`, {});
       }
-      progress.textContent = 'Navbatga qo‘yilmoqda…';
-      await api('POST', `/api/projects/${project.id}/run`, {});
-      toast('Loyiha navbatga qo‘yildi', 'ok');
-      location.hash = `#/project/${project.id}`;
+      toast(variants > 1 ? `${variants} ta variant navbatga qo‘yildi` : 'Loyiha navbatga qo‘yildi', 'ok');
+      location.hash = variants > 1 ? '#/projects' : `#/project/${project.id}`;
     } catch (err) {
       toast(err.message, 'bad');
       btn.disabled = false;
@@ -727,6 +746,12 @@ views.project = async ([id]) => {
         <div class="help">Format o‘zgarsa, “AI bilan qayta yaratish” tavsiya etiladi (ssenariy uzunligi moslashadi).</div></div>`;
     if (!sc?.scenes?.length) return `<div class="grid grid-2">${formatSel}</div><div class="empty-state">Ssenariy hali yozilmagan — bosqichlar tugashini kuting.</div>`;
     const words = sceneWords(sc.scenes);
+    const stockMode = (p.inputs.visualSource || channel?.visualSource) === 'stock';
+    const media = (x, i) => {
+      if (x.clipFile) return `<video muted loop playsinline preload="metadata" src="/files/${p.id}/${esc(x.clipFile)}?v=${stamp()}#t=0.5" title="Sahna ${i + 1}"></video>`;
+      if (x.imageFile) return `<a href="/files/${p.id}/${esc(x.imageFile)}?v=${stamp()}" target="_blank"><img alt="Sahna ${i + 1}" src="/files/${p.id}/${esc(x.imageFile)}?v=${stamp()}"></a>`;
+      return `<div class="scene-ph">${stockMode ? 'video yo‘q' : 'rasm yo‘q'}</div>`;
+    };
     return `
       <div class="grid grid-2">
         <div><label>Video nomi (ssenariy)</label><input data-content="scriptTitle" value="${esc(sc.title || '')}" maxlength="100"></div>
@@ -736,19 +761,22 @@ views.project = async ([id]) => {
       </div>
       <div class="row" style="justify-content:space-between;margin-top:16px"><h3 style="margin:0">Sahnalar</h3>
         <button class="btn small" type="button" id="copy-prompts">📋 Rasm va ovoz promptlarini nusxalash</button></div>
-      <div class="help">Matnni o‘zgartirsangiz — faqat shu sahnaning ovozi qayta yoziladi; rasm tavsifini o‘zgartirsangiz — faqat shu rasm qayta chiziladi. Diktor matnini bo‘shatsangiz, sahna o‘chadi. 🖼/🎤 tugmalari bilan istalgan sahnaga o‘zingiz yasagan rasm yoki ovozni qo‘yasiz.</div>
+      <div class="help">${stockMode
+        ? 'Matnni o‘zgartirsangiz — faqat shu sahnaning ovozi qayta yoziladi; kalit so‘zlarni o‘zgartirsangiz — shu sahnaga boshqa stok video topiladi. Diktor matnini bo‘shatsangiz, sahna o‘chadi. 🖼/🎤 tugmalari bilan o‘z rasm, video yoki ovozingizni qo‘yasiz.'
+        : 'Matnni o‘zgartirsangiz — faqat shu sahnaning ovozi qayta yoziladi; rasm tavsifini o‘zgartirsangiz — faqat shu rasm qayta chiziladi. Diktor matnini bo‘shatsangiz, sahna o‘chadi. 🖼/🎤 tugmalari bilan istalgan sahnaga o‘zingiz yasagan rasm, video yoki ovozni qo‘yasiz.'}</div>
       <datalist id="sfx-names">${['whoosh', 'pop', 'ding', 'click', 'thud', 'rise', 'boing'].map((n) => `<option value="${n}">`).join('')}</datalist>
       <div class="scenes">${sc.scenes.map((x, i) => `
         <div class="scene" data-scene="${i}">
           <div>
-            ${x.imageFile ? `<a href="/files/${p.id}/${esc(x.imageFile)}?v=${stamp()}" target="_blank"><img alt="Sahna ${i + 1}" src="/files/${p.id}/${esc(x.imageFile)}?v=${stamp()}"></a>` : '<div class="scene-ph">rasm yo‘q</div>'}
+            ${media(x, i)}
             <div class="row scene-tools">
-              <label class="btn small" title="O‘z rasmingizni qo‘yish">🖼<input type="file" hidden data-scene-file="image" accept=".png,.jpg,.jpeg,.webp"></label>
+              <label class="btn small" title="O‘z rasmingiz yoki videongizni qo‘yish">🖼<input type="file" hidden data-scene-file="image" accept=".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm,.mkv"></label>
               <label class="btn small" title="O‘z ovozingizni qo‘yish">🎤<input type="file" hidden data-scene-file="voice" accept=".mp3,.wav,.m4a,.ogg,.flac"></label>
-              ${x.imageManual ? '<button type="button" class="btn small" data-scene-reset="image" title="Rasmni AI chizsin">↺🖼</button>' : ''}
+              ${x.imageManual || x.clipManual ? `<button type="button" class="btn small" data-scene-reset="image" title="${stockMode ? 'Stok video topilsin' : 'Rasmni AI chizsin'}">↺🖼</button>` : ''}
               ${x.voiceManual ? '<button type="button" class="btn small" data-scene-reset="voice" title="Ovozni AI yozsin">↺🎤</button>' : ''}
             </div>
-            ${x.imageManual || x.voiceManual ? `<div class="help">O‘zingizniki: ${[x.imageManual && 'rasm', x.voiceManual && 'ovoz'].filter(Boolean).join(', ')}</div>` : ''}
+            ${x.imageManual || x.clipManual || x.voiceManual ? `<div class="help">O‘zingizniki: ${[x.imageManual && 'rasm', x.clipManual && 'video', x.voiceManual && 'ovoz'].filter(Boolean).join(', ')}</div>` : ''}
+            ${x.clipMeta && !x.clipManual ? `<div class="help">🎞 <a href="${esc(/^https?:\/\//.test(x.clipMeta.page || '') ? x.clipMeta.page : '#')}" target="_blank" rel="noopener">${esc(x.clipMeta.provider)}${x.clipMeta.author ? ` · ${esc(x.clipMeta.author)}` : ''}</a></div>` : ''}
             ${x.voiceFile ? `<audio controls preload="none" src="/files/${p.id}/${esc(x.voiceFile)}"></audio>` : ''}
           </div>
           <div>
@@ -759,7 +787,9 @@ views.project = async ([id]) => {
               <div><label>Sariq so‘zlar</label><input data-scene-highlight value="${esc((x.highlight || []).join(', '))}" placeholder="chemical, attack"></div>
               <div><label>Effekt</label><input data-scene-sfx value="${esc(x.sfx || '')}" list="sfx-names" placeholder="whoosh"></div>
             </div>
-            <label>Rasm tavsifi (AI uchun, inglizcha)</label>
+            ${stockMode ? `<label>Video qidiruv so‘zlari (inglizcha, vergul bilan)</label>
+            <input data-scene-keywords value="${esc((x.keywords || []).join(', '))}" placeholder="city night traffic, busy street">` : ''}
+            <label>${stockMode ? 'Kadr tavsifi (inglizcha)' : 'Rasm tavsifi (AI uchun, inglizcha)'}</label>
             <textarea data-scene-visual rows="2">${esc(x.visual)}</textarea>
           </div>
         </div>`).join('')}</div>
@@ -872,9 +902,10 @@ views.project = async ([id]) => {
         label: val(el, 'label'),
         highlight: val(el, 'highlight').split(',').map((x) => x.trim()).filter(Boolean),
         sfx: val(el, 'sfx'),
+        ...(el.querySelector('[data-scene-keywords]') ? { keywords: val(el, 'keywords').split(',').map((x) => x.trim()).filter(Boolean) } : {}),
       }));
       const old = p.content.script?.scenes || [];
-      const same = (x, o) => o && x.narration === o.narration && x.visual === o.visual && x.label === (o.label || '') && x.sfx === (o.sfx || '') && x.highlight.join() === (o.highlight || []).join();
+      const same = (x, o) => o && x.narration === o.narration && x.visual === o.visual && x.label === (o.label || '') && x.sfx === (o.sfx || '') && x.highlight.join() === (o.highlight || []).join() && (!x.keywords || x.keywords.join() === (o.keywords || []).join());
       if (scenes.length !== old.length || scenes.some((x, i) => !same(x, old[i]))) {
         // Effekt maydoni o'zgarmagan bo'lsa, uni yubormaymiz (AI tanlovi saqlanadi)
         if (scenes.every((x, i) => x.sfx === (old[i]?.sfx || ''))) scenes.forEach((x) => delete x.sfx);
@@ -941,6 +972,11 @@ views.project = async ([id]) => {
         prompt('Nusxa oling:', text);
       }
     });
+    // Stok klip: sichqoncha ustiga kelganda o'ynaydi
+    main.querySelectorAll('.scene video').forEach((v) => {
+      v.addEventListener('mouseenter', () => v.play().catch(() => {}));
+      v.addEventListener('mouseleave', () => v.pause());
+    });
     main.querySelectorAll('[data-scene-file]').forEach((input) => input.addEventListener('change', async () => {
       const file = input.files[0];
       const idx = input.closest('[data-scene]').dataset.scene;
@@ -949,7 +985,7 @@ views.project = async ([id]) => {
         await saveContent();
         const kind = input.dataset.sceneFile;
         await putFile(`/api/projects/${id}/scenes/${idx}/${kind}?name=${encodeURIComponent(file.name)}`, file);
-        toast(`${Number(idx) + 1}-sahna ${kind === 'image' ? 'rasmi' : 'ovozi'} almashtirildi. “Qayta montaj” bosing.`, 'ok');
+        toast(`${Number(idx) + 1}-sahna ${kind === 'image' ? (/^video\//.test(file.type) ? 'videosi' : 'rasmi') : 'ovozi'} almashtirildi. “Qayta montaj” bosing.`, 'ok');
         await reload();
       } catch (err) {
         toast(err.message, 'bad');
@@ -967,6 +1003,7 @@ views.project = async ([id]) => {
       list.insertAdjacentHTML('beforeend', `<div class="scene" data-scene="new"><div class="scene-ph">yangi</div><div>
         <label>${i + 1}. Diktor matni</label><textarea data-scene-narration rows="3"></textarea>
         <div class="grid grid-3"><div><label>Tepadagi yorliq</label><input data-scene-label maxlength="40"></div><div><label>Sariq so‘zlar</label><input data-scene-highlight></div><div><label>Effekt</label><input data-scene-sfx list="sfx-names"></div></div>
+        ${main.querySelector('[data-scene-keywords]') ? '<label>Video qidiruv so‘zlari (inglizcha, vergul bilan)</label><input data-scene-keywords placeholder="Bo‘sh qolsa, matndan olinadi">' : ''}
         <label>Rasm tavsifi (AI uchun, inglizcha)</label><textarea data-scene-visual rows="2" placeholder="Bo‘sh qolsa, matndan avtomatik tuziladi"></textarea></div></div>`);
       list.lastElementChild.querySelector('textarea').focus();
     });
@@ -2061,6 +2098,55 @@ const KEY_CARDS = [
     fields: [{ key: 'elevenKey', label: 'API kalit', secret: true, placeholder: 'sk_…' }],
   },
   {
+    id: 'azure',
+    title: 'Azure Speech — Microsoft ovozlari (bepul)',
+    use: 'Edge’dagi tabiiy ovozlarning rasmiy yo‘li: 140+ til, o‘zbekcha ham (Madina, Sardor). Har oy 500 000 belgi bepul — taxminan 100 ta 4 daqiqalik video.',
+    link: 'https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices',
+    steps: [
+      'portal.azure.com da bepul hisob oching (karta faqat shaxsni tasdiqlash uchun so‘raladi)',
+      'Havolani oching → “Speech service” → Region: masalan, East US → Pricing tier: Free F0 → Create',
+      'Tayyor bo‘lgach: “Keys and Endpoint” → KEY 1 va Location/Region’ni nusxalang',
+      'Shu yerga qo‘yib tekshiring, ovozni tanlang va yuqorida “Diktor ovozi”da Azure’ni tanlang',
+    ],
+    fields: [
+      { key: 'azureSpeechKey', label: 'API kalit (KEY 1)', secret: true, placeholder: '32 belgili kalit' },
+      { key: 'azureSpeechRegion', label: 'Region', placeholder: 'eastus' },
+    ],
+  },
+  {
+    id: 'compat',
+    title: 'Boshqa AI: DeepSeek, OpenRouter, Groq, Ollama…',
+    use: 'OpenAI bilan mos har qanday matn modeli. DeepSeek juda arzon, Groq tez, Ollama esa kompyuteringizda bepul ishlaydi.',
+    link: 'https://platform.deepseek.com/api_keys',
+    steps: [
+      'Pastdagi tayyor tugmalardan birini bosing — manzil o‘zi yoziladi',
+      'Xizmat saytida API kalit oling (Ollama’da kalit kerak emas)',
+      '“Saqlash va tekshirish” → modellar ro‘yxatidan bittasini tanlang',
+      'Yuqorida “Matn” uchun “Boshqa AI”ni tanlang. Narxlarni Sozlamalar → Byudjet’da shu xizmatnikiga moslang',
+    ],
+    fields: [
+      { key: 'compatBaseUrl', label: 'Manzil (Base URL)', placeholder: 'https://api.deepseek.com/v1' },
+      { key: 'compatKey', label: 'API kalit', secret: true, optional: true, placeholder: 'sk-… (Ollama uchun bo‘sh)' },
+      { key: 'compatModel', label: 'Model', optional: true, list: 'compat-models', placeholder: 'deepseek-chat' },
+    ],
+  },
+  {
+    id: 'pexels',
+    title: 'Pexels — bepul stok videolar',
+    use: '“Stok video” kanallari uchun: har sahnaga mavzuga mos HD klip topiladi (rasm chizish shart emas)',
+    link: 'https://www.pexels.com/api/new/',
+    steps: ['pexels.com da ro‘yxatdan o‘ting', 'Havolani oching → maqsadni qisqa yozing → API kalitni oling', 'Kalitni shu yerga qo‘ying'],
+    fields: [{ key: 'pexelsKey', label: 'API kalit', secret: true }],
+  },
+  {
+    id: 'pixabay',
+    title: 'Pixabay — bepul stok videolar',
+    use: 'Pexels bilan birga ishlatilsa, tanlov ikki barobar ko‘payadi. Bittasi ham yetarli.',
+    link: 'https://pixabay.com/api/docs/#api_search_videos',
+    steps: ['pixabay.com da ro‘yxatdan o‘ting', 'Havolani oching — kalitingiz sahifada “key” qatorida yashil rangda turadi', 'Kalitni shu yerga qo‘ying'],
+    fields: [{ key: 'pixabayKey', label: 'API kalit', secret: true }],
+  },
+  {
     id: 'google',
     title: 'Google OAuth — YouTube’ga yuklash',
     use: 'Videolarni kanalingizga yuklash, chuqur statistika va izohlarga javob. Parolingiz kerak emas.',
@@ -2108,7 +2194,7 @@ views.keys = async (parts, query) => {
   const data = await api('GET', '/api/keys');
   const s = data.settings;
   const checks = data.checks;
-  const has = (card) => card.fields.every((f) => s[f.key]);
+  const has = (card) => card.fields.every((f) => f.optional || s[f.key]);
   const status = (card) => {
     const c = checks[card.id];
     if (!has(card)) return '<span class="badge">Kiritilmagan</span>';
@@ -2138,6 +2224,15 @@ views.keys = async (parts, query) => {
     elevenlabs: `<div><label>Ovoz</label><select data-set="elevenVoiceId" id="eleven-voices">
         ${s.elevenVoiceId ? `<option value="${esc(s.elevenVoiceId)}" selected>${esc(s.elevenVoiceId)}</option>` : '<option value="">— avval kalitni tekshiring —</option>'}
       </select></div>`,
+    azure: `<div class="grid grid-2">
+        <div><label>Ovoz</label><select data-set="azureVoice" id="azure-voices">
+          <option value="${esc(s.azureVoice)}" selected>${esc(s.azureVoice)}</option>
+          ${AZURE_VOICES.filter((v) => v.id !== s.azureVoice).map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}
+        </select><div class="help">Kalit tekshirilgach, barcha ovozlar chiqadi. “Multilingual” ovozlar har qanday tilda gapiradi.</div></div>
+        <div><label>Tezlik</label><select data-set="azureRate">${['-10%', '+0%', '+10%', '+20%'].map((r) => `<option value="${r}" ${(s.azureRate || '+0%') === r ? 'selected' : ''}>${r === '+0%' ? 'Oddiy' : r}</option>`).join('')}</select></div>
+      </div>`,
+    compat: `<div class="row" style="margin-top:8px;flex-wrap:wrap">${COMPAT_PRESETS.map((p) => `<button type="button" class="btn small" data-compat="${esc(p.url)}" data-compat-model="${esc(p.model || '')}">${esc(p.name)}</button>`).join('')}</div>
+      <datalist id="compat-models"></datalist>`,
     google: `<div class="wizard">
         <b>⚡ Oson sozlash — 4 qadam, har biri bitta tugma</b>
         <ol>
@@ -2177,11 +2272,13 @@ views.keys = async (parts, query) => {
           <option value="anthropic" ${s.textProvider === 'anthropic' ? 'selected' : ''}>Anthropic (Claude) — tavsiya</option>
           <option value="openai" ${s.textProvider === 'openai' ? 'selected' : ''}>OpenAI</option>
           <option value="gemini" ${s.textProvider === 'gemini' ? 'selected' : ''}>Google Gemini</option>
+          <option value="compat" ${s.textProvider === 'compat' ? 'selected' : ''}>Boshqa AI (DeepSeek, Groq, Ollama…)</option>
           <option value="none" ${s.textProvider === 'none' ? 'selected' : ''}>AI’siz (shablonlar)</option></select></div>
         <div><label>Diktor ovozi</label><select data-set="ttsProvider">
-          <option value="openai" ${s.ttsProvider !== 'elevenlabs' ? 'selected' : ''}>OpenAI TTS — arzon</option>
+          <option value="openai" ${!['elevenlabs', 'gemini', 'azure'].includes(s.ttsProvider) ? 'selected' : ''}>OpenAI TTS — arzon</option>
           <option value="elevenlabs" ${s.ttsProvider === 'elevenlabs' ? 'selected' : ''}>ElevenLabs — o‘z ovozingiz</option>
-          <option value="gemini" ${s.ttsProvider === 'gemini' ? 'selected' : ''}>Google AI Studio (Gemini) — ohang bilan, arzon</option></select></div>
+          <option value="gemini" ${s.ttsProvider === 'gemini' ? 'selected' : ''}>Google AI Studio (Gemini) — ohang bilan, arzon</option>
+          <option value="azure" ${s.ttsProvider === 'azure' ? 'selected' : ''}>Azure Speech (Microsoft) — bepul 500k belgi, o‘zbekcha bor</option></select></div>
         <div><label>Sahna rasmlari (personajli videolar)</label><select data-set="imageProvider">
           <option value="openai" ${s.imageProvider !== 'gemini' ? 'selected' : ''}>OpenAI gpt-image — personajni aniq saqlaydi</option>
           <option value="gemini" ${s.imageProvider === 'gemini' ? 'selected' : ''}>Gemini (Nano Banana) — arzon, ~$0.04/rasm</option></select></div>
@@ -2190,6 +2287,7 @@ views.keys = async (parts, query) => {
       </div>
       <div class="help" style="margin-top:8px">4 daqiqalik tushuntiruvchi video ≈ 35 sahna: OpenAI o‘rta sifatda ~$2.2, Gemini’da ~$1.4, OpenAI past sifatda ~$0.6. Shorts ≈ 8 sahna — 4–5 barobar arzon.</div>
       <div class="help" style="margin-top:8px">Minimal to‘plam: <b>Anthropic + OpenAI</b> (matn va ovoz) + <b>Google OAuth</b> (yuklash). Qolganlari ixtiyoriy. Kalitsiz ham montaj ishlaydi.</div>
+      <div class="help" style="margin-top:8px">Eng arzon to‘plam: <b>Gemini</b> yoki <b>DeepSeek</b> (matn) + <b>Azure Speech</b> (ovoz, bepul) + <b>Pexels</b> (stok video, bepul) — rasm chizilmaydi, video deyarli tekin chiqadi.</div>
     </div>
     <div class="grid grid-2">
       ${KEY_CARDS.map((card) => `
@@ -2203,7 +2301,7 @@ views.keys = async (parts, query) => {
           ${card.fields.map((f) => `
             <label>${esc(f.label)}</label>
             <div class="row" style="flex-wrap:nowrap">
-              <input data-field="${f.key}" type="${f.secret ? 'password' : 'text'}" value="${esc(s[f.key])}" placeholder="${esc(f.placeholder || '')}" autocomplete="off" spellcheck="false">
+              <input data-field="${f.key}" type="${f.secret ? 'password' : 'text'}" value="${esc(s[f.key])}" placeholder="${esc(f.placeholder || '')}" ${f.list ? `list="${f.list}"` : ''} autocomplete="off" spellcheck="false">
               ${f.secret ? '<button type="button" class="btn small" data-reveal title="Ko‘rsatish">👁</button>' : ''}
             </div>`).join('')}
           ${extra[card.id] || ''}
@@ -2216,8 +2314,8 @@ views.keys = async (parts, query) => {
     </div>
     <div class="card" id="custom-keys">
       <h2>➕ Boshqa API kalitlar</h2>
-      <p class="sub">Boshqa xizmatlar (Suno, Kling, Runway, Pexels va h.k.) kalitlarini shu yerda bir joyda saqlang. Dastur hozircha ulardan foydalanmaydi — qaysi xizmatni ulash kerakligini aytsangiz, shu kalit bilan integratsiya qo‘shiladi.</p>
-      <datalist id="key-presets">${['Suno', 'Kling AI', 'Runway', 'Luma AI', 'Higgsfield', 'Pexels', 'Pixabay', 'Replicate', 'Stability AI', 'Midjourney', 'Groq', 'DeepSeek', 'Mistral', 'xAI (Grok)', 'TikTok', 'Instagram / Meta', 'Cloudflare'].map((n) => `<option value="${n}">`).join('')}</datalist>
+      <p class="sub">Boshqa xizmatlar (Suno, Kling, Runway va h.k.) kalitlarini shu yerda bir joyda saqlang. Dastur hozircha ulardan foydalanmaydi — qaysi xizmatni ulash kerakligini aytsangiz, shu kalit bilan integratsiya qo‘shiladi.</p>
+      <datalist id="key-presets">${['Suno', 'Kling AI', 'Runway', 'Luma AI', 'Higgsfield', 'Replicate', 'Stability AI', 'Midjourney', 'Mistral', 'xAI (Grok)', 'TikTok', 'Instagram / Meta', 'Cloudflare'].map((n) => `<option value="${n}">`).join('')}</datalist>
       <div id="custom-rows">${(s.customKeys || []).map((c) => customKeyRow(c)).join('')}</div>
       <div class="row" style="margin-top:10px">
         <button type="button" class="btn" id="custom-add">+ Kalit qo‘shish</button>
@@ -2293,6 +2391,32 @@ views.keys = async (parts, query) => {
     sel.innerHTML = list.map((m) => `<option value="${esc(m.id)}" ${m.id === current ? 'selected' : ''}>${esc(m.name)} (${esc(m.id)})</option>`).join('');
   };
 
+  const fillAzureVoices = (voices) => {
+    const sel = document.getElementById('azure-voices');
+    if (!sel || !voices?.length) return;
+    const current = sel.value || s.azureVoice;
+    let group = '';
+    sel.innerHTML = voices
+      .map((v) => {
+        const head = v.locale !== group ? `${group ? '</optgroup>' : ''}<optgroup label="${esc(v.locale)}">` : '';
+        group = v.locale;
+        return `${head}<option value="${esc(v.id)}" ${v.id === current ? 'selected' : ''}>${esc(v.name)} — ${esc(v.id)}</option>`;
+      })
+      .join('') + '</optgroup>';
+  };
+
+  const fillCompatModels = (models) => {
+    const list = document.getElementById('compat-models');
+    if (list && models?.length) list.innerHTML = models.map((m) => `<option value="${esc(m.id)}">`).join('');
+  };
+
+  main.querySelectorAll('[data-compat]').forEach((b) => b.addEventListener('click', () => {
+    const card = b.closest('[data-card]');
+    card.querySelector('[data-field="compatBaseUrl"]').value = b.dataset.compat;
+    card.querySelector('[data-field="compatModel"]').value = b.dataset.compatModel;
+    card.querySelector('[data-field="compatKey"]').focus();
+  }));
+
   main.querySelectorAll('[data-card]').forEach((cardEl) => {
     const id = cardEl.dataset.card;
     const card = KEY_CARDS.find((c) => c.id === id);
@@ -2302,9 +2426,13 @@ views.keys = async (parts, query) => {
       const r = await api('POST', `/api/keys/${id}/verify`);
       result.textContent = r.detail;
       cardEl.querySelector('[data-status]').innerHTML = r.ok ? '<span class="badge ok">✓ Ishlayapti</span>' : '<span class="badge bad">✕ Xato</span>';
-      if (r.voices) fillVoices(r.voices);
-      if (r.model) s.geminiModel = r.model;
-      if (r.models) fillGeminiModels(r.models);
+      if (id === 'elevenlabs') fillVoices(r.voices);
+      if (id === 'azure') fillAzureVoices(r.voices);
+      if (id === 'gemini') {
+        if (r.model) s.geminiModel = r.model;
+        fillGeminiModels(r.models);
+      }
+      if (id === 'compat') fillCompatModels(r.models);
       return r;
     };
     cardEl.querySelector('[data-save]').addEventListener('click', async (e) => {
@@ -2368,9 +2496,36 @@ views.keys = async (parts, query) => {
     }
   });
 
-  // ElevenLabs kaliti saqlangan bo'lsa, ovozlar ro'yxatini darhol olib kelamiz
+  // Kalit saqlangan bo'lsa, ovozlar va modellar ro'yxatini darhol olib kelamiz
   if (s.elevenKey) api('POST', '/api/keys/elevenlabs/verify').then((r) => fillVoices(r.voices)).catch(() => {});
+  if (s.azureSpeechKey) api('POST', '/api/keys/azure/verify').then((r) => fillAzureVoices(r.voices)).catch(() => {});
+  if (s.compatBaseUrl) api('POST', '/api/keys/compat/verify').then((r) => fillCompatModels(r.models)).catch(() => {});
 };
+
+// Kalit tekshirilmaguncha ko'rsatiladigan eng kerakli Azure ovozlari
+const AZURE_VOICES = [
+  { id: 'uz-UZ-MadinaNeural', name: 'Madina (o‘zbek, ayol)' },
+  { id: 'uz-UZ-SardorNeural', name: 'Sardor (o‘zbek, erkak)' },
+  { id: 'en-US-AndrewMultilingualNeural', name: 'Andrew (ingliz, erkak, ko‘p tilli)' },
+  { id: 'en-US-AvaMultilingualNeural', name: 'Ava (ingliz, ayol, ko‘p tilli)' },
+  { id: 'en-US-BrianMultilingualNeural', name: 'Brian (ingliz, erkak, ko‘p tilli)' },
+  { id: 'en-US-EmmaMultilingualNeural', name: 'Emma (ingliz, ayol, ko‘p tilli)' },
+  { id: 'en-US-GuyNeural', name: 'Guy (ingliz, erkak)' },
+  { id: 'en-US-JennyNeural', name: 'Jenny (ingliz, ayol)' },
+  { id: 'ru-RU-DmitryNeural', name: 'Dmitriy (rus, erkak)' },
+  { id: 'ru-RU-SvetlanaNeural', name: 'Svetlana (rus, ayol)' },
+];
+
+// OpenAI bilan mos xizmatlar: manzil o'zi yoziladi, model — tekshirgandan keyin ro'yxatdan
+const COMPAT_PRESETS = [
+  { name: 'DeepSeek', url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { name: 'OpenRouter', url: 'https://openrouter.ai/api/v1' },
+  { name: 'Groq', url: 'https://api.groq.com/openai/v1' },
+  { name: 'Ollama (kompyuterda)', url: 'http://localhost:11434/v1' },
+  { name: 'Qwen', url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+  { name: 'Kimi (Moonshot)', url: 'https://api.moonshot.ai/v1' },
+  { name: 'Mistral', url: 'https://api.mistral.ai/v1' },
+];
 
 const GEMINI_VOICES = ['Puck', 'Kore', 'Charon', 'Fenrir', 'Aoede', 'Zephyr', 'Leda', 'Orus', 'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba', 'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar', 'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi', 'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'];
 
@@ -2446,6 +2601,7 @@ views.settings = async (parts, query) => {
         <div><label>Nomi *</label><input name="name" required placeholder="Masalan: Bubu Explains"></div>
         <div><label>Turi</label><select name="type">
           <option value="explainer">🎬 Tushuntiruvchi (personaj + g‘oya)</option>
+          <option value="stock">📹 Stok video (Pexels/Pixabay) — personajsiz, faktlar/top-10</option>
           <option value="music">🎵 Musiqa (Suno)</option>
           <option value="fight">🥊 Jang tahlili</option></select></div>
         <div><label>Til</label><input name="language" value="en"></div>
@@ -2485,7 +2641,16 @@ views.settings = async (parts, query) => {
           <label class="check" style="margin-top:10px"><input type="checkbox" name="karaoke" ${c.karaoke !== false ? 'checked' : ''}> Karaoke: so‘zlar aytilganda birma-bir yonadi</label>
           <label class="check"><input type="checkbox" name="translateLyrics" ${c.translateLyrics !== false ? 'checked' : ''}> Inglizcha bo‘lmagan qo‘shiqlarda ostiga inglizcha tarjima qatori</label>
           <label class="check"><input type="checkbox" name="bgMotion" ${c.bgMotion !== false ? 'checked' : ''}> Jonli fon: rasm sekin suzib turadi</label>` : c.type === 'explainer' ? `
-          <h3 style="margin-top:14px">Personaj</h3>
+          <div class="grid grid-3" style="margin-top:14px">
+            <div><label>Sahna tasvirlari</label><select name="visualSource">
+              <option value="character" ${c.visualSource !== 'stock' ? 'selected' : ''}>🎨 AI rasm (personaj bilan)</option>
+              <option value="stock" ${c.visualSource === 'stock' ? 'selected' : ''}>📹 Stok videolar (Pexels / Pixabay)</option></select>
+              <div class="help">Stok rejimida personaj va rasm kaliti kerak emas — video deyarli tekin chiqadi.</div></div>
+            <div><label>Sahnalar orasida o‘tish</label><select name="transition">
+              <option value="none" ${c.transition !== 'fade' ? 'selected' : ''}>Yo‘q (keskin almashadi)</option>
+              <option value="fade" ${c.transition === 'fade' ? 'selected' : ''}>Silliq (fade)</option></select></div>
+          </div>
+          <h3 style="margin-top:14px">Personaj ${c.visualSource === 'stock' ? '<span class="sub">(stok rejimida ishlatilmaydi)</span>' : ''}</h3>
           <div class="row" style="align-items:flex-start;gap:16px">
             ${c.characterFile ? `<img src="${characterUrl(c)}" alt="Personaj" class="char-preview">` : '<div class="char-preview empty">Personaj yo‘q</div>'}
             <div style="flex:1;min-width:220px">
@@ -2503,6 +2668,15 @@ views.settings = async (parts, query) => {
           <label class="check" style="margin-top:10px"><input type="checkbox" name="captionsShort" ${c.captionsShort !== false ? 'checked' : ''}> Shorts’da subtitrlar</label>
           <label class="check"><input type="checkbox" name="captionsLong" ${c.captionsLong ? 'checked' : ''}> Uzun videoda ham subtitrlar</label>
           <label class="check"><input type="checkbox" name="sceneLabels" ${c.sceneLabels !== false ? 'checked' : ''}> Har sahna tepasida rangli yorliq (masalan, “TINY CHEMICAL ATTACK”)</label>
+          <div class="grid grid-3">
+            <div><label>Subtitr joyi</label><select name="captionPosition">${[['bottom', 'Pastda'], ['middle', 'O‘rtada'], ['top', 'Tepada']].map(([v, l]) => `<option value="${v}" ${(c.captionPosition || 'bottom') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div><label>Subtitr o‘lchami</label><select name="captionSize">${[['small', 'Kichik'], ['medium', 'O‘rta'], ['large', 'Katta']].map(([v, l]) => `<option value="${v}" ${(c.captionSize || 'medium') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+            <div><label>Subtitr ranglari</label><div class="row" style="flex-wrap:nowrap;gap:6px">
+              <input name="captionColor" type="color" value="${esc(c.captionColor || '#ffffff')}" title="Matn rangi">
+              <input name="highlightColor" type="color" value="${esc(c.highlightColor || '#ffd400')}" title="Kalit so‘z rangi">
+              <input name="captionBg" type="color" value="${esc(c.captionBg || '#1d2230')}" title="Fon rangi"></div>
+              <div class="help">Matn · kalit so‘z · fon</div></div>
+          </div>
           <div class="grid grid-3">
             <div><label>Subtitr uslubi</label><select name="captionStyle"><option value="pill" ${(c.captionStyle || 'pill') === 'pill' ? 'selected' : ''}>Qora fonli, kalit so‘z sariq</option><option value="outline" ${c.captionStyle === 'outline' ? 'selected' : ''}>Katta oq harf, qora chiziq</option></select></div>
             <div><label>Effektlar ovozi (0–1.5)</label><input name="sfxVolume" type="number" min="0" max="1.5" step="0.05" value="${esc(c.sfxVolume ?? 0.5)}"></div>
@@ -2587,7 +2761,7 @@ views.settings = async (parts, query) => {
     try {
       const ch = await api('POST', '/api/channels', Object.fromEntries(new FormData(newForm)));
       await getChannels(true);
-      toast(`“${ch.name}” kanali yaratildi${ch.type === 'explainer' ? ' — endi personaj rasmini yuklang' : ''}`, 'ok');
+      toast(`“${ch.name}” kanali yaratildi${ch.visualSource === 'stock' ? ' — API kalitlar sahifasida Pexels yoki Pixabay kalitini kiriting' : ch.type === 'explainer' ? ' — endi personaj rasmini yuklang' : ''}`, 'ok');
       await views.settings([], new URLSearchParams());
       document.querySelector(`form[data-channel="${ch.id}"]`)?.scrollIntoView({ behavior: 'smooth' });
     } catch (err) {

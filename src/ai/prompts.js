@@ -395,23 +395,33 @@ const SCENE_EXTRAS = (sfxNames) => `- "label": a punchy 2-4 word caption shown a
 - "sfx": one short sound effect that fits the moment, preferably one of: ${sfxNames.join(', ') || 'whoosh, pop, ding, click, thud, rise, boing'}. Use "" when silence is better; don't put the same effect on every scene.
 - "voiceStyle": only when the line needs a special tone (whisper, shocked, laughing); otherwise "".`;
 
-export function explainerScriptPrompt({ channel, project, seconds, sceneSeconds, character, sfxNames = [] }) {
+// Stok video rejimi: kadrlar Pexels/Pixabay'dan olinadi, shuning uchun har sahnaga qidiruv so'zlari kerak
+const STOCK_RULES = `- "keywords": 2-3 short English search queries (1-3 words each) for REAL stock footage that shows this scene, most specific first, e.g. ["ocean waves aerial", "beach sunset", "ocean"]. Concrete, filmable things — no abstract ideas, no text, no famous people or brands.
+- "visual": one sentence describing the real-life shot (camera, subject, action).`;
+
+const variantNote = (project) => (Number(project.inputs.variant) > 0
+  ? `\nThis is variant #${Number(project.inputs.variant) + 1} of the same topic: use a DIFFERENT hook, angle, structure and title than a typical version, while keeping the facts correct.`
+  : '');
+
+export function explainerScriptPrompt({ channel, project, seconds, sceneSeconds, character, sfxNames = [], stock = false }) {
   const scenes = Math.max(4, Math.round(seconds / sceneSeconds));
   const words = Math.round(seconds * 2.5);
   return {
-    system: `You are the head writer of a hit faceless animated explainer channel (in the spirit of channels like Pele Explains): one recurring mascot character, simple flat illustrations, friendly curious voice, a strong curiosity loop from the first line, fast pacing, light humor, and a satisfying payoff. ${IDEA_RULES}`,
+    system: stock
+      ? `You are the head writer of a hit faceless YouTube channel that tells short, gripping stories over real stock footage: a strong curiosity loop from the first line, fast pacing, vivid concrete language and a satisfying payoff. ${IDEA_RULES}`
+      : `You are the head writer of a hit faceless animated explainer channel (in the spirit of channels like Pele Explains): one recurring mascot character, simple flat illustrations, friendly curious voice, a strong curiosity loop from the first line, fast pacing, light humor, and a satisfying payoff. ${IDEA_RULES}`,
     prompt: `Write the full video script, split into illustrated scenes.
 
 Channel: ${channel.name}. Topic area: ${channel.niche || 'curious facts about the human body, habits, nature and everyday life'}.
-${channel.style ? `Visual style notes: ${channel.style}\n` : ''}Mascot: ${character || 'the channel mascot'}.
-Video idea from the owner: ${project.inputs.idea}
+${channel.style && !stock ? `Visual style notes: ${channel.style}\n` : ''}${stock ? 'Visuals: real stock video clips matched to each scene.' : `Mascot: ${character || 'the channel mascot'}.`}
+Video idea from the owner: ${project.inputs.idea}${variantNote(project)}
 ${project.inputs.notes ? `Extra wishes: ${project.inputs.notes}\n` : ''}Format: ${project.format === 'short' ? 'vertical YouTube Short' : 'horizontal YouTube video'}, about ${seconds} seconds (~${words} spoken words).
 Language: ${channel.language || 'en'}
 
 Requirements:
 - Scene 1 is the hook: a surprising question or claim that creates a curiosity gap in the first 3 seconds. No "hello guys", no channel intro.
 - About ${scenes} scenes, each ~${sceneSeconds} seconds of narration (1-3 short sentences). Every scene must change the picture.
-- "visual" describes ONE simple illustration with the mascot: pose, emotion, props, small background elements, optional red arrow or a 1-3 word label. Keep the mascot central and consistent.
+${stock ? STOCK_RULES : '- "visual" describes ONE simple illustration with the mascot: pose, emotion, props, small background elements, optional red arrow or a 1-3 word label. Keep the mascot central and consistent.'}
 - Facts must be accurate and not exaggerated; if something is a common myth, say so.
 - The last scene is a short payoff + soft call to action (subscribe / next video), not a long outro.
 ${SCENE_EXTRAS(sfxNames)}
@@ -420,9 +430,9 @@ Return JSON:
 {
   "title": "YouTube title, max 60 characters, curiosity driven, not misleading",
   "voiceStyle": "one line: how the narrator sounds overall (e.g. upbeat, curious, playful, medium-fast)",
-  "scenes": [{"narration": "exact voice-over text", "visual": "illustration description", "label": "2-4 WORD TOP LABEL", "highlight": ["1-2 key words from narration"], "sfx": "one sound effect", "voiceStyle": "optional tone for this line"}],
+  "scenes": [{"narration": "exact voice-over text", "visual": "${stock ? 'real shot description' : 'illustration description'}", ${stock ? '"keywords": ["stock search 1", "stock search 2"], ' : ''}"label": "2-4 WORD TOP LABEL", "highlight": ["1-2 key words from narration"], "sfx": "one sound effect", "voiceStyle": "optional tone for this line"}],
   "thumbnailText": "2-4 words, the thumbnail headline",
-  "thumbnailConcept": "what the thumbnail illustration shows (mascot pose + 1-2 props), in English",
+  "thumbnailConcept": "${stock ? 'what the thumbnail shows, in English' : 'what the thumbnail illustration shows (mascot pose + 1-2 props), in English'}",
   "description": "YouTube description, 2-4 sentences, no hashtags",
   "hashtags": ["#...", "#...", "#..."],
   "tags": ["10-15 tags"]
@@ -431,7 +441,7 @@ Return JSON:
 }
 
 /** Tayyor sahnalarga (o'zingiz yasagan rasm/ovoz) yorliq, effekt va SEO qo'shish. */
-export function annotateScenesPrompt({ channel, project, scenes, sfxNames = [] }) {
+export function annotateScenesPrompt({ channel, project, scenes, sfxNames = [], stock = false }) {
   return {
     system: `You are the editor of a hit faceless animated explainer channel. You add on-screen labels, subtitle highlights and sound effects to an existing script, and write its YouTube metadata. ${IDEA_RULES}`,
     prompt: `Annotate these scenes of a ${project.format === 'short' ? 'vertical YouTube Short' : 'horizontal YouTube video'}.
@@ -444,13 +454,13 @@ Scenes (narration):
 ${scenes.map((s, i) => `${i + 1}. ${s.narration || '(no narration)'}`).join('\n')}
 
 Rules:
-${SCENE_EXTRAS(sfxNames)}
+${SCENE_EXTRAS(sfxNames)}${stock ? `\n${STOCK_RULES.split('\n')[0]}` : ''}
 - Return exactly ${scenes.length} scene objects, in the same order.
 
 Return JSON:
 {
   "title": "YouTube title, max 60 characters, curiosity driven, not misleading",
-  "scenes": [{"label": "...", "highlight": ["..."], "sfx": "..."}],
+  "scenes": [{"label": "...", "highlight": ["..."], "sfx": "..."${stock ? ', "keywords": ["..."]' : ''}}],
   "thumbnailText": "2-4 words",
   "thumbnailConcept": "what the thumbnail illustration shows, in English",
   "description": "YouTube description, 2-4 sentences, no hashtags",

@@ -63,13 +63,13 @@ export function t(text) {
     // "Yorliq: qiymat" — "Ulangan: Overtone AI" yoki "Overtone AI: YouTube’ga ulangan"
     const m = /^([^:]+):\s+(.+)$/u.exec(core);
     if (m) {
-      const lp = /^([^\p{L}\p{N}]*)(.*)$/u.exec(m[1]);
+      const lp = /^([^\p{L}\p{N}]*)([\s\S]*)$/u.exec(m[1]);
       const lt = lookup(dict, `${lp[2]}:`);
       const label = lt == null ? null : lp[1] + lt;
       const value = lookup(dict, m[2]);
       if (label != null) out = `${label} ${value ?? m[2]}`;
       else if (value != null) {
-        const pre = /^([^\p{L}\p{N}]*)(.*)$/u.exec(m[1]);
+        const pre = /^([^\p{L}\p{N}]*)([\s\S]*)$/u.exec(m[1]);
         out = `${pre[1]}${pre[2]}: ${value}`;
       }
     }

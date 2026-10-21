@@ -4,6 +4,9 @@ import path from 'node:path';
 import { db, save } from './store.js';
 import { ROOT } from './config.js';
 import { GEMINI_BASE, geminiGenerate } from './ai/gemini.js';
+import { azureBase } from './ai/speech.js';
+import { compatBase } from './ai/llm.js';
+import { PEXELS, PIXABAY } from './media/stock.js';
 
 const OAUTH_TOKEN_URL = process.env.GOOGLE_TOKEN_URL || 'https://oauth2.googleapis.com/token';
 
@@ -75,6 +78,51 @@ const CHECKS = {
     };
   },
 
+  async azure(s) {
+    if (!s.azureSpeechKey || !s.azureSpeechRegion) return { ok: false, detail: 'Kalit va region (masalan, eastus) ikkalasi ham kerak' };
+    const { res, data } = await getJson(`${azureBase(s.azureSpeechRegion)}/cognitiveservices/voices/list`, { 'Ocp-Apim-Subscription-Key': s.azureSpeechKey });
+    if (res.status === 401) return { ok: false, detail: 'Kalit noto‘g‘ri yoki region mos emas (kalit qaysi regionda yaratilgan bo‘lsa, o‘shani yozing).' };
+    if (!res.ok) return fail(res, data, 'Azure xatosi');
+    // Avval o'zbek, ingliz, rus ovozlari — kanallar uchun eng keraklilari
+    const order = ['uz-UZ', 'en-US', 'ru-RU', 'en-GB'];
+    const rank = (v) => (order.includes(v.locale) ? order.indexOf(v.locale) : order.length);
+    const voices = (Array.isArray(data) ? data : [])
+      .map((v) => ({ id: v.ShortName, name: `${v.LocalName || v.DisplayName} (${v.LocaleName || v.Locale}, ${v.Gender === 'Female' ? 'ayol' : 'erkak'})`, locale: v.Locale }))
+      .sort((a, b) => rank(a) - rank(b) || a.locale.localeCompare(b.locale) || a.id.localeCompare(b.id));
+    const chosen = voices.find((v) => v.id === s.azureVoice);
+    return { ok: true, detail: chosen ? `Ishlayapti. Ovoz: ${chosen.name}` : `Ishlayapti. ${voices.length} ta ovoz — ro‘yxatdan tanlang.`, voices };
+  },
+
+  async compat(s) {
+    if (!s.compatBaseUrl) return { ok: false, detail: 'Manzil (Base URL) kiritilmagan' };
+    const base = compatBase(s.compatBaseUrl);
+    const { res, data } = await getJson(`${base}/models`, s.compatKey ? { authorization: `Bearer ${s.compatKey}` } : {});
+    if (!res.ok) return fail(res, data, `${base} javob bermadi`);
+    const models = (data.data || data.models || []).map((m) => ({ id: m.id || m.name, name: m.name || m.id })).filter((m) => m.id);
+    if (!s.compatModel) return { ok: false, detail: `Ulandi. ${models.length} ta model topildi — bittasini tanlang.`, models };
+    const known = !models.length || models.some((m) => m.id === s.compatModel);
+    return {
+      ok: known,
+      detail: known ? `Ishlayapti. Model: ${s.compatModel}` : `Ulandi, lekin “${s.compatModel}” modeli ro‘yxatda yo‘q — ro‘yxatdan tanlang.`,
+      models,
+    };
+  },
+
+  async pexels(s) {
+    if (!s.pexelsKey) return { ok: false, detail: 'Kalit kiritilmagan' };
+    const { res, data } = await getJson(`${PEXELS}/videos/search?query=city&per_page=1`, { authorization: s.pexelsKey });
+    if (!res.ok) return fail(res, data, 'Pexels xatosi');
+    return { ok: true, detail: `Ishlayapti (“city” bo‘yicha ${data.total_results ?? 0} ta video)` };
+  },
+
+  async pixabay(s) {
+    if (!s.pixabayKey) return { ok: false, detail: 'Kalit kiritilmagan' };
+    const { res, data } = await getJson(`${PIXABAY}/videos/?key=${encodeURIComponent(s.pixabayKey)}&q=city&per_page=3`);
+    if (res.status === 400 || res.status === 401) return { ok: false, detail: 'Kalit noto‘g‘ri (Pixabay kalitni tanimadi)' };
+    if (!res.ok) return fail(res, data, 'Pixabay xatosi');
+    return { ok: true, detail: `Ishlayapti (“city” bo‘yicha ${data.totalHits ?? 0} ta video)` };
+  },
+
   async youtubeKey(s) {
     if (!s.youtubeApiKey) return { ok: false, detail: 'Kalit kiritilmagan' };
     const { res, data } = await getJson(`https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=%40YouTube&key=${encodeURIComponent(s.youtubeApiKey)}`);
@@ -144,7 +192,13 @@ export async function verifyKey(service) {
   try {
     result = await check(db().settings);
   } catch (err) {
-    result = { ok: false, detail: err.name === 'TimeoutError' ? 'Javob kelmadi (internet aloqasini tekshiring)' : err.message };
+    result = {
+      ok: false,
+      detail:
+        err.name === 'TimeoutError' ? 'Javob kelmadi (internet aloqasini tekshiring)'
+        : err.message === 'fetch failed' ? 'Xizmatga ulanib bo‘lmadi — internet aloqasini va manzilni tekshiring (Ollama bo‘lsa, u ishga tushirilganmi?)'
+        : err.message,
+    };
   }
   const data = db();
   data.keyChecks ||= {};

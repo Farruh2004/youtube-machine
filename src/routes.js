@@ -18,10 +18,11 @@ import * as comp from './competitors.js';
 import { channelDir, normalizeScene, scenePrompt } from './workflows/explainer.js';
 import { SFX_DIR, listSfx, listMusic, ensureBuiltinSfx } from './media/sfx.js';
 import { imageProviderReady } from './ai/images.js';
+import { stockReady } from './media/stock.js';
 import { verifyKey, keyChecks, SERVICES } from './keys.js';
 import { SOURCES_DIR, sourceDir, getSource, createSource, analyzeSource, candidateToProject, deleteSource } from './highlights.js';
 
-const SECRET_KEYS = ['anthropicKey', 'openaiKey', 'geminiKey', 'googleClientSecret', 'youtubeApiKey', 'elevenKey', 'telegramToken', 'githubToken'];
+const SECRET_KEYS = ['anthropicKey', 'openaiKey', 'geminiKey', 'googleClientSecret', 'youtubeApiKey', 'elevenKey', 'telegramToken', 'githubToken', 'azureSpeechKey', 'compatKey', 'pexelsKey', 'pixabayKey'];
 const MASK = '••••';
 const UPLOAD_FIELDS = {
   audio: ['.mp3', '.wav', '.m4a', '.flac', '.ogg'],
@@ -91,6 +92,20 @@ function mustChannel(id) {
   return c;
 }
 
+export function internalUrl(url) {
+  let host;
+  try {
+    host = new URL(String(url).trim()).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  } catch {
+    return true;
+  }
+  return (
+    host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host === '::1' || host === '0.0.0.0' ||
+    /^(127|10|0)\./.test(host) || /^169\.254\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) || /^f[cd]/.test(host) || /^fe80:/.test(host) || /^::ffff:/.test(host)
+  );
+}
+
 function publicSettings() {
   const s = { ...db().settings };
   for (const k of SECRET_KEYS) s[k] = s[k] ? `${MASK}${s[k].slice(-4)}` : '';
@@ -111,13 +126,16 @@ function setupChecklist() {
   return [
     { key: 'ffmpeg', label: 'ffmpeg o‘rnatilgan', ok: Boolean(ffmpegStatus?.ok), hint: ffmpegStatus?.error || (ffmpegStatus?.missing?.length ? `Yetishmayotgan filtrlar: ${ffmpegStatus.missing.join(', ')}` : '') },
     { key: 'text', label: 'Matn uchun AI kaliti (ssenariy, SEO, tahlil)', ok: textProviderReady(), hint: 'API kalitlar sahifasi' },
-    { key: 'voice', label: 'Diktor ovozi kaliti (OpenAI, ElevenLabs yoki Google AI Studio)', ok: ttsReady(), hint: 'API kalitlar sahifasi' },
+    { key: 'voice', label: 'Diktor ovozi kaliti (OpenAI, ElevenLabs, Google AI Studio yoki Azure)', ok: ttsReady(), hint: 'API kalitlar sahifasi' },
     { key: 'whisper', label: 'OpenAI kaliti (qo‘shiq matnini vokalga moslab vaqtlash)', ok: speechReady(), hint: 'API kalitlar sahifasi' },
-    ...(db().channels.some((c) => c.type === 'explainer')
+    ...(db().channels.some((c) => c.type === 'explainer' && c.visualSource !== 'stock')
       ? [
           { key: 'images', label: 'Sahna rasmlari kaliti (OpenAI yoki Gemini)', ok: imageProviderReady(), hint: 'API kalitlar sahifasi' },
-          ...db().channels.filter((c) => c.type === 'explainer').map((c) => ({ key: `char-${c.id}`, label: `${c.name}: personaj rasmi yuklangan`, ok: Boolean(c.characterFile), hint: 'Sozlamalar → Kanallar' })),
+          ...db().channels.filter((c) => c.type === 'explainer' && c.visualSource !== 'stock').map((c) => ({ key: `char-${c.id}`, label: `${c.name}: personaj rasmi yuklangan`, ok: Boolean(c.characterFile), hint: 'Sozlamalar → Kanallar' })),
         ]
+      : []),
+    ...(db().channels.some((c) => c.type === 'explainer' && c.visualSource === 'stock')
+      ? [{ key: 'stock', label: 'Stok video kaliti (Pexels yoki Pixabay)', ok: stockReady(), hint: 'API kalitlar sahifasi' }]
       : []),
     { key: 'google', label: 'Google OAuth mijozi (YouTube’ga yuklash)', ok: Boolean(s.googleClientId && s.googleClientSecret), hint: 'API kalitlar sahifasi' },
     { key: 'telegram', label: 'Telegram bot ulangan (ixtiyoriy)', ok: Boolean(s.telegramToken && s.telegramChatId), hint: 'API kalitlar sahifasi' },
@@ -176,6 +194,9 @@ route('PUT', '/api/settings', async (req) => {
   for (const [k, v] of Object.entries(body)) {
     if (!(k in s)) continue;
     if (SECRET_KEYS.includes(k) && typeof v === 'string' && v.startsWith(MASK)) continue;
+    // Saytda foydalanuvchi server ichidagi manzillarga so'rov yubora olmasin
+    if (k === 'compatBaseUrl' && v && GATEWAY_SECRET && internalUrl(v)) throw new HttpError(400, 'Saytda ichki manzil (localhost, 192.168…) ishlatib bo‘lmaydi. Ollama faqat kompyuterdagi versiyada ishlaydi.');
+    if (k === 'compatBaseUrl' && v && !/^https?:\/\//i.test(String(v).trim())) throw new HttpError(400, 'Manzil http:// yoki https:// bilan boshlansin');
     if (k === 'prices') s.prices = { ...s.prices, ...Object.fromEntries(Object.entries(v).map(([pk, pv]) => [pk, Number(pv) || 0])) };
     else if (k === 'monthlyBudget' || k === 'uploadLeadHours') s[k] = Number(v) || 0;
     else if (k === 'customKeys') {
@@ -195,11 +216,16 @@ route('PUT', '/api/settings', async (req) => {
 route('PUT', '/api/channels/:id', async (req, { id }) => {
   const c = mustChannel(id);
   const body = await readJson(req);
-  const allowed = ['name', 'handle', 'publishTime', 'shortsSeconds', 'defaultPrivacy', 'aiDisclosure', 'categoryId', 'language', 'baseTags', 'descriptionFooter', 'colors', 'shortsPerSong', 'karaoke', 'translateLyrics', 'bgMotion', 'fightEffects', 'smartCrop', 'nicheKeywords', 'niche', 'style', 'sceneSeconds', 'captionsLong', 'captionsShort', 'defaultFormat', 'captionStyle', 'sceneLabels', 'sfx', 'sfxGenerate', 'sfxVolume', 'musicAuto', 'musicVolume', 'voiceStyle'];
+  const allowed = ['name', 'handle', 'publishTime', 'shortsSeconds', 'defaultPrivacy', 'aiDisclosure', 'categoryId', 'language', 'baseTags', 'descriptionFooter', 'colors', 'shortsPerSong', 'karaoke', 'translateLyrics', 'bgMotion', 'fightEffects', 'smartCrop', 'nicheKeywords', 'niche', 'style', 'sceneSeconds', 'captionsLong', 'captionsShort', 'defaultFormat', 'captionStyle', 'sceneLabels', 'sfx', 'sfxGenerate', 'sfxVolume', 'musicAuto', 'musicVolume', 'voiceStyle', 'visualSource', 'transition', 'captionPosition', 'captionSize', 'captionColor', 'highlightColor', 'captionBg'];
   for (const k of allowed) if (k in body) c[k] = body[k];
   c.shortsSeconds = Math.max(10, Math.min(180, Number(c.shortsSeconds) || 40));
   for (const k of ['sfxVolume', 'musicVolume']) if (k in body) c[k] = Math.max(0, Math.min(1.5, Number(body[k]) || 0));
   if ('captionStyle' in body) c.captionStyle = body.captionStyle === 'outline' ? 'outline' : 'pill';
+  if ('visualSource' in body) c.visualSource = body.visualSource === 'stock' ? 'stock' : 'character';
+  if ('transition' in body) c.transition = body.transition === 'fade' ? 'fade' : 'none';
+  if ('captionPosition' in body) c.captionPosition = ['top', 'middle', 'bottom'].includes(body.captionPosition) ? body.captionPosition : 'bottom';
+  if ('captionSize' in body) c.captionSize = ['small', 'medium', 'large'].includes(body.captionSize) ? body.captionSize : 'medium';
+  for (const k of ['captionColor', 'highlightColor', 'captionBg']) if (k in body && !/^#[0-9a-f]{6}$/i.test(String(body[k]))) delete c[k];
   if ('sceneSeconds' in body) c.sceneSeconds = Math.max(3, Math.min(20, Number(body.sceneSeconds) || 7));
   if ('shortsPerSong' in body) c.shortsPerSong = Math.max(1, Math.min(5, Number(body.shortsPerSong) || 1));
   if (typeof c.baseTags === 'string') c.baseTags = c.baseTags.split(',').map((t) => t.trim()).filter(Boolean);
@@ -213,14 +239,17 @@ const CHANNEL_DEFAULTS = {
   fight: { colors: { primary: '#ef4444', secondary: '#111827' }, publishTime: '19:00', shortsSeconds: 58, fightEffects: true, smartCrop: true, categoryId: '17', aiDisclosure: false, baseTags: ['fight breakdown'], descriptionFooter: '🥊 Original breakdown and commentary.' },
 };
 
-export function createChannel({ name, type = 'explainer', handle = '', language = 'en', niche = '', style = '' }) {
+export function createChannel({ name, type = 'explainer', handle = '', language = 'en', niche = '', style = '', visualSource = '' }) {
   const clean = String(name || '').trim().slice(0, 60);
   if (!clean) throw new HttpError(400, 'Kanal nomini kiriting');
+  // "Stok video" kanali — tushuntiruvchi kanalning Pexels/Pixabay kliplari bilan ishlaydigan turi
+  const stock = type === 'stock' || visualSource === 'stock';
+  if (type === 'stock') type = 'explainer';
   if (!CHANNEL_DEFAULTS[type]) throw new HttpError(400, 'Noma’lum kanal turi');
   const base = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'kanal';
   let id = base;
   for (let i = 2; getChannel(id); i++) id = `${base}-${i}`;
-  const channel = { id, name: clean, type, handle: String(handle || '').trim(), language, niche: String(niche || '').slice(0, 500), style: String(style || '').slice(0, 500), defaultPrivacy: 'public', ...structuredClone(CHANNEL_DEFAULTS[type]), youtube: null, createdAt: new Date().toISOString() };
+  const channel = { id, name: clean, type, handle: String(handle || '').trim(), language, niche: String(niche || '').slice(0, 500), style: String(style || '').slice(0, 500), defaultPrivacy: 'public', ...structuredClone(CHANNEL_DEFAULTS[type]), ...(stock ? { visualSource: 'stock', captionsLong: true, transition: 'fade', baseTags: ['facts', 'explained'], colors: { primary: '#22c55e', secondary: '#111827', background: '#000000' } } : {}), youtube: null, createdAt: new Date().toISOString() };
   db().channels.push(channel);
   save();
   return channel;
@@ -376,7 +405,10 @@ route('POST', '/api/projects', async (req) => {
 
 function sanitizeInputs(inputs = {}) {
   const textFields = ['songTitle', 'genre', 'mood', 'lyricsLanguage', 'lyrics', 'fighters', 'event', 'notes', 'sourceRights', 'idea', 'ownScript', 'targetMinutes', 'targetSeconds'];
-  return Object.fromEntries(textFields.filter((k) => k in inputs).map((k) => [k, String(inputs[k] ?? '').slice(0, 20000)]));
+  const out = Object.fromEntries(textFields.filter((k) => k in inputs).map((k) => [k, String(inputs[k] ?? '').slice(0, 20000)]));
+  if ('visualSource' in inputs) out.visualSource = ['stock', 'character'].includes(inputs.visualSource) ? inputs.visualSource : '';
+  if ('variant' in inputs) out.variant = String(Math.max(0, Math.min(9, Number(inputs.variant) || 0)));
+  return out;
 }
 
 route('GET', '/api/projects/:id', (req, { id }) => mustProject(id));
@@ -407,7 +439,7 @@ route('PUT', '/api/projects/:id', async (req, { id }) => {
         .map((x, i) => {
           const prev = Number.isInteger(x.from) ? old[x.from] : 'from' in x ? null : old[i];
           const pick = (k) => (k in x ? x[k] : prev?.[k]);
-          return { ...(prev || {}), ...normalizeScene({ narration: pick('narration'), visual: pick('visual'), label: pick('label'), highlight: pick('highlight'), sfx: pick('sfx'), voiceStyle: pick('voiceStyle') }) };
+          return { ...(prev || {}), ...normalizeScene({ narration: pick('narration'), visual: pick('visual'), label: pick('label'), highlight: pick('highlight'), sfx: pick('sfx'), voiceStyle: pick('voiceStyle'), keywords: pick('keywords') }) };
         })
         // Bo'sh sahna o'chadi (o'zingiz yuklagan rasm/ovozli sahna — matnsiz ham qoladi)
         .filter((x) => x.narration || x.imageManual || x.voiceManual);
@@ -477,7 +509,8 @@ route('DELETE', '/api/projects/:id/upload', (req, { id }, url) => {
 });
 
 // ---------- Tayyor materiallar (o'zingiz yasagan rasm va ovozlar) ----------
-const IMPORT = { image: ['importImages', 'import-img', UPLOAD_FIELDS.cover], voice: ['importVoices', 'import-voice', UPLOAD_FIELDS.voice.concat(['.ogg', '.flac'])] };
+const VIDEO_UP = ['.mp4', '.mov', '.webm', '.mkv', '.m4v'];
+const IMPORT = { image: ['importImages', 'import-img', UPLOAD_FIELDS.cover.concat(VIDEO_UP)], voice: ['importVoices', 'import-voice', UPLOAD_FIELDS.voice.concat(['.ogg', '.flac'])] };
 
 route('PUT', '/api/projects/:id/import', async (req, { id }, url) => {
   const p = mustProject(id);
@@ -510,13 +543,16 @@ route('PUT', '/api/projects/:id/scenes/:index/:kind', async (req, { id, index, k
   const sc = p.content.script?.scenes?.[Number(index)];
   if (!sc || !['image', 'voice'].includes(kind)) throw new HttpError(404, 'Sahna topilmadi');
   const ext = path.extname(url.searchParams.get('name') || '').toLowerCase();
-  const allowed = kind === 'image' ? UPLOAD_FIELDS.cover : IMPORT.voice[2];
+  const allowed = kind === 'image' ? IMPORT.image[2] : IMPORT.voice[2];
   if (!allowed.includes(ext)) throw new HttpError(400, `Ruxsat etilgan formatlar: ${allowed.join(', ')}`);
-  const name = `manual-${kind === 'image' ? 'img' : 'voice'}-${crypto.randomBytes(4).toString('hex')}${ext}`;
+  const isVideo = VIDEO_UP.includes(ext);
+  const name = `manual-${kind === 'image' ? (isVideo ? 'clip' : 'img') : 'voice'}-${crypto.randomBytes(4).toString('hex')}${ext}`;
   await streamPipeline(req, fs.createWriteStream(path.join(projectDir(p.id), name)));
-  const old = kind === 'image' ? sc.imageManual && sc.imageFile : sc.voiceManual && sc.voiceFile;
-  if (old && old.startsWith('manual-')) fs.rmSync(path.join(projectDir(p.id), old), { force: true });
-  if (kind === 'image') Object.assign(sc, { imageFile: name, imageManual: true, imageKey: null });
+  const olds = kind === 'image' ? [sc.imageManual && sc.imageFile, sc.clipManual && sc.clipFile] : [sc.voiceManual && sc.voiceFile];
+  for (const old of olds) if (old && old.startsWith('manual-')) fs.rmSync(path.join(projectDir(p.id), old), { force: true });
+  // Rasm yoki video klip: sahnaning tasviri shunga almashadi
+  if (kind === 'image' && isVideo) Object.assign(sc, { clipFile: name, clipManual: true, clipKey: null, imageFile: null, imageManual: false });
+  else if (kind === 'image') Object.assign(sc, { imageFile: name, imageManual: true, imageKey: null, clipFile: null, clipManual: false });
   else {
     Object.assign(sc, { voiceFile: name, voiceManual: true, voiceKey: null, wordsKey: null, words: null });
     // Umumiy ovoz rejimidan sahnalab ovozga o'tiladi
@@ -530,7 +566,7 @@ route('DELETE', '/api/projects/:id/scenes/:index/:kind', (req, { id, index, kind
   const p = mustProject(id);
   const sc = p.content.script?.scenes?.[Number(index)];
   if (!sc || !['image', 'voice'].includes(kind)) throw new HttpError(404, 'Sahna topilmadi');
-  if (kind === 'image') Object.assign(sc, { imageManual: false, imageKey: null });
+  if (kind === 'image') Object.assign(sc, { imageManual: false, imageKey: null, clipManual: false, clipKey: null });
   else Object.assign(sc, { voiceManual: false, voiceKey: null });
   save();
   return p;

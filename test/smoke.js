@@ -51,7 +51,34 @@ execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=220:d=1.6', '-ac', '1', path.join(TMP, 'fake-voice.mp3')]);
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=yellow:s=300x400', '-frames:v', '1', path.join(TMP, 'fake-character.png')]);
 execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=300:d=1.2', '-ac', '1', '-ar', '24000', '-f', 's16le', path.join(TMP, 'fake-voice.pcm')]);
+execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:d=3', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', path.join(TMP, 'fake-clip.mp4')]);
+// Stok video (Pexels/Pixabay), Azure ovozi va OpenAI-mos AI (DeepSeek kabi) so'rovlari
+const stockCalls = [];
+const azureCalls = [];
+const compatCalls = [];
+/** Soxta AI javoblari (Anthropic va OpenAI-mos xizmatlar uchun umumiy): so'rov matniga qarab. */
+function fakeAnswer(text) {
+  return text.includes('Describe the character in the attached image')
+    ? { description: 'A round yellow mascot with black glasses and thick outlines.' }
+    : text.includes('Write the full video script, split into illustrated scenes')
+    ? { title: 'Why You Yawn', scenes: [1, 2, 3, 4].map((n) => ({ narration: `Scene ${n} says something true and short.`, visual: `mascot pose ${n}`, keywords: [`city night ${n}`, 'city'] })), thumbnailText: 'WHY YAWN?', thumbnailConcept: 'mascot yawning', description: 'About yawning.', hashtags: ['#facts'], tags: ['yawn'] }
+    : text.includes('Annotate these scenes')
+    ? { title: 'Onion Tears', scenes: [{ label: 'Onion vs you', highlight: ['cry'], sfx: 'pop' }, { label: 'Chemical attack', highlight: ['chemical'], sfx: 'sizzle frying' }, { label: 'Wash it out', highlight: ['wash'], sfx: '' }], thumbnailText: 'WHY CRY?', thumbnailConcept: 'man crying at onion', description: 'Onions.', hashtags: ['#onion'], tags: ['onion'] }
+    : text.includes('Analyze this competitor')
+    ? { summary: 'Tushuntiruvchi kanal', formula: 'Savol + personaj', titlePatterns: [{ pattern: 'Signs You ___', example: 'Signs', why: 'qiziqish' }], thumbnailStyle: ['sariq personaj'], topicClusters: [], whatToCopy: ['qisqa gaplar'], whatToAvoid: ['qo‘rqitish'], gaps: ['uyqu'] }
+    : text.includes('Generate video ideas')
+    ? { ideas: [1, 2, 3].map((n) => ({ title: `Idea ${n}`, hook: 'Did you know?', angle: 'yangi', format: 'long', lengthSec: 240, thumbnailText: 'WOW', thumbnailConcept: 'personaj', inspiredBy: 'Signs', why: '5x', potential: 9 - n })) }
+    : text.includes('Write the full script for a new song')
+    ? { title: 'Song', songConcept: 'sevgi', sunoStyle: 'arabic pop, emotional', lyrics: '[Verse]\nla la\n[Chorus]\nhey', thumbnailText: 'LOVE', description: 'd', tags: ['t'] }
+    : text.includes('Write the full script for this video')
+    ? { title: 'Script', hook: 'Did you know?', sections: [{ heading: 'Intro', narration: 'Your body does this.', visual: 'yellow character points' }, { heading: 'Fact', narration: 'Here is why.', visual: 'diagram' }], cta: 'Subscribe', estimatedSeconds: 240, thumbnailText: 'WOW', description: 'd', tags: ['t'] }
+    : text.includes('Diagnose why this video')
+    ? { verdict: 'Gorizontal va bloklangan', reasons: [{ reason: 'Content ID', evidence: '40 davlat', confidence: 'yuqori' }], thumbnail: 'ok', hook: 'tezroq', betterTitles: ['Brutal Knockout Breakdown'], fixes: ['vertikal qiling'], reupload: 'ha' }
+    : { summary: 'Kanal yangi', whyNotGrowing: [{ reason: 'Format', evidence: 'v4', fix: 'vertikal', impact: 'yuqori' }], actionPlan: [{ step: 'Shorts', why: 'ishlayapti' }], winningPatterns: ['Shorts'], titleFormula: 'Title — Mood Song', thumbnailAdvice: ['katta matn'], nextVideos: [{ title: 'Idea', why: 'sabab' }] };
+}
+
 const geminiBusy = { count: 0, done: false };
+const fakeBase = () => `http://127.0.0.1:${googleServer.address().port}`;
 const googleServer = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   let body = '';
@@ -110,6 +137,54 @@ const googleServer = http.createServer((req, res) => {
       openaiCalls.push('gemini-tts');
       return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;codec=pcm;rate=24000', data: fs.readFileSync(path.join(TMP, 'fake-voice.pcm')).toString('base64') } }] } }] }));
     }
+    if (p === '/pexels/videos/search') {
+      const q = url.searchParams.get('query');
+      stockCalls.push({ provider: 'pexels', q, auth: req.headers.authorization, orientation: url.searchParams.get('orientation') });
+      const base = fakeBase();
+      const portrait = url.searchParams.get('orientation') === 'portrait';
+      return res.end(JSON.stringify({ total_results: 3, videos: [1, 2, 3].map((n) => ({ id: `${q}-${n}`, url: `https://pexels.test/${n}`, duration: 8, user: { name: 'Ann' }, video_files: [{ link: `${base}/clip/px.mp4`, width: portrait ? 1080 : 1920, height: portrait ? 1920 : 1080, file_type: 'video/mp4' }, { link: `${base}/clip/px-4k.mp4`, width: 3840, height: 2160, file_type: 'video/mp4' }] })) }));
+    }
+    if (p === '/pixabay/api/videos/') {
+      stockCalls.push({ provider: 'pixabay', q: url.searchParams.get('q'), key: url.searchParams.get('key') });
+      return res.end(JSON.stringify({ totalHits: 2, hits: [1, 2].map((n) => ({ id: `${url.searchParams.get('q')}-${n}`, pageURL: `https://pixabay.test/${n}`, duration: 2, user: 'bob', videos: { medium: { url: `${fakeBase()}/clip/pb.mp4`, width: 1280, height: 720 } } })) }));
+    }
+    if (p.startsWith('/clip/')) {
+      stockCalls.push({ provider: 'download', file: p });
+      res.setHeader('content-type', 'video/mp4');
+      return res.end(fs.readFileSync(path.join(TMP, 'fake-clip.mp4')));
+    }
+    if (p === '/azure/cognitiveservices/v1') {
+      azureCalls.push({ key: req.headers['ocp-apim-subscription-key'], format: req.headers['x-microsoft-outputformat'], body });
+      if (req.headers['ocp-apim-subscription-key'] !== 'AZK') {
+        res.statusCode = 401;
+        return res.end('');
+      }
+      res.setHeader('content-type', 'audio/mpeg');
+      return res.end(fs.readFileSync(path.join(TMP, 'fake-voice.mp3')));
+    }
+    if (p === '/azure/cognitiveservices/voices/list') {
+      if (req.headers['ocp-apim-subscription-key'] !== 'AZK') {
+        res.statusCode = 401;
+        return res.end('');
+      }
+      return res.end(JSON.stringify([
+        { ShortName: 'de-DE-KatjaNeural', LocalName: 'Katja', Locale: 'de-DE', LocaleName: 'German', Gender: 'Female' },
+        { ShortName: 'uz-UZ-SardorNeural', LocalName: 'Sardor', Locale: 'uz-UZ', LocaleName: 'Uzbek', Gender: 'Male' },
+        { ShortName: 'en-US-AndrewMultilingualNeural', LocalName: 'Andrew', Locale: 'en-US', LocaleName: 'English', Gender: 'Male' },
+      ]));
+    }
+    if (p === '/compat/v1/models') return res.end(JSON.stringify({ data: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] }));
+    if (p === '/compat/v1/chat/completions') {
+      const parsed = JSON.parse(body);
+      compatCalls.push({ ...parsed, auth: req.headers.authorization });
+      // Ba'zi xizmatlar response_format'ni bilmaydi — dastur usiz qayta so'rashi kerak
+      if (parsed.response_format) {
+        res.statusCode = 400;
+        return res.end(JSON.stringify({ error: { message: 'response_format is not supported' } }));
+      }
+      const content = '<think>planning…</think>\n```json\n' + JSON.stringify(fakeAnswer(parsed.messages[1].content)) + '\n```';
+      return res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 1000, completion_tokens: 200 } }));
+    }
     if (p === '/eleven/v1/sound-generation') {
       openaiCalls.push('sfx');
       res.setHeader('content-type', 'audio/mpeg');
@@ -125,23 +200,7 @@ const googleServer = http.createServer((req, res) => {
       llmRequests.push(parsed);
       const content = parsed.messages[0].content;
       const text = typeof content === 'string' ? content : content.find((c) => c.type === 'text').text;
-      const answer = text.includes('Describe the character in the attached image')
-        ? { description: 'A round yellow mascot with black glasses and thick outlines.' }
-        : text.includes('Write the full video script, split into illustrated scenes')
-        ? { title: 'Why You Yawn', scenes: [1, 2, 3, 4].map((n) => ({ narration: `Scene ${n} says something true and short.`, visual: `mascot pose ${n}` })), thumbnailText: 'WHY YAWN?', thumbnailConcept: 'mascot yawning', description: 'About yawning.', hashtags: ['#facts'], tags: ['yawn'] }
-        : text.includes('Annotate these scenes')
-        ? { title: 'Onion Tears', scenes: [{ label: 'Onion vs you', highlight: ['cry'], sfx: 'pop' }, { label: 'Chemical attack', highlight: ['chemical'], sfx: 'sizzle frying' }, { label: 'Wash it out', highlight: ['wash'], sfx: '' }], thumbnailText: 'WHY CRY?', thumbnailConcept: 'man crying at onion', description: 'Onions.', hashtags: ['#onion'], tags: ['onion'] }
-        : text.includes('Analyze this competitor')
-        ? { summary: 'Tushuntiruvchi kanal', formula: 'Savol + personaj', titlePatterns: [{ pattern: 'Signs You ___', example: 'Signs', why: 'qiziqish' }], thumbnailStyle: ['sariq personaj'], topicClusters: [], whatToCopy: ['qisqa gaplar'], whatToAvoid: ['qo‘rqitish'], gaps: ['uyqu'] }
-        : text.includes('Generate video ideas')
-        ? { ideas: [1, 2, 3].map((n) => ({ title: `Idea ${n}`, hook: 'Did you know?', angle: 'yangi', format: 'long', lengthSec: 240, thumbnailText: 'WOW', thumbnailConcept: 'personaj', inspiredBy: 'Signs', why: '5x', potential: 9 - n })) }
-        : text.includes('Write the full script for a new song')
-        ? { title: 'Song', songConcept: 'sevgi', sunoStyle: 'arabic pop, emotional', lyrics: '[Verse]\nla la\n[Chorus]\nhey', thumbnailText: 'LOVE', description: 'd', tags: ['t'] }
-        : text.includes('Write the full script for this video')
-        ? { title: 'Script', hook: 'Did you know?', sections: [{ heading: 'Intro', narration: 'Your body does this.', visual: 'yellow character points' }, { heading: 'Fact', narration: 'Here is why.', visual: 'diagram' }], cta: 'Subscribe', estimatedSeconds: 240, thumbnailText: 'WOW', description: 'd', tags: ['t'] }
-        : text.includes('Diagnose why this video')
-        ? { verdict: 'Gorizontal va bloklangan', reasons: [{ reason: 'Content ID', evidence: '40 davlat', confidence: 'yuqori' }], thumbnail: 'ok', hook: 'tezroq', betterTitles: ['Brutal Knockout Breakdown'], fixes: ['vertikal qiling'], reupload: 'ha' }
-        : { summary: 'Kanal yangi', whyNotGrowing: [{ reason: 'Format', evidence: 'v4', fix: 'vertikal', impact: 'yuqori' }], actionPlan: [{ step: 'Shorts', why: 'ishlayapti' }], winningPatterns: ['Shorts'], titleFormula: 'Title — Mood Song', thumbnailAdvice: ['katta matn'], nextVideos: [{ title: 'Idea', why: 'sabab' }] };
+      const answer = fakeAnswer(text);
       return res.end(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(answer) }], stop_reason: 'end_turn', usage: { input_tokens: 2000, output_tokens: 300 } }));
     }
     res.statusCode = 404;
@@ -156,6 +215,9 @@ process.env.GEMINI_API_BASE = `http://127.0.0.1:${googleServer.address().port}/g
 process.env.GEMINI_RETRY_MS = '10,10,10';
 process.env.GOOGLE_TOKEN_URL = `http://127.0.0.1:${googleServer.address().port}/oauth-token`;
 process.env.ELEVEN_API_BASE = `http://127.0.0.1:${googleServer.address().port}/eleven`;
+process.env.PEXELS_API_BASE = `http://127.0.0.1:${googleServer.address().port}/pexels`;
+process.env.PIXABAY_API_BASE = `http://127.0.0.1:${googleServer.address().port}/pixabay/api`;
+process.env.AZURE_TTS_BASE = `http://127.0.0.1:${googleServer.address().port}/azure`;
 
 const { load, db, save, newId, projectDir } = await import('../src/store.js');
 const { initSteps, enqueue, queueState } = await import('../src/pipeline.js');
@@ -538,6 +600,91 @@ assert.deepEqual(await generateJson({ system: 's', prompt: 'p', maxTokens: 100 }
 assert.equal(geminiBusy.count, 2, 'ikki marta band, uchinchisida javob');
 Object.assign(db().settings, { geminiKey: '', ttsProvider: 'openai', textProvider: 'anthropic' });
 
+// --- MoneyPrinterTurbo uslubi: stok videolar + Azure ovozi + OpenAI-mos AI (DeepSeek) + variant + subtitr ko'rinishi ---
+const facts = createChannel({ name: 'Fact Clips', type: 'stock' });
+assert.equal(facts.type, 'explainer');
+assert.equal(facts.visualSource, 'stock');
+assert.equal(facts.transition, 'fade');
+Object.assign(facts, { captionPosition: 'top', captionSize: 'large', captionColor: '#00ff00', musicAuto: false });
+Object.assign(db().settings, {
+  textProvider: 'compat', compatBaseUrl: `${fakeBase()}/compat/v1/`, compatKey: 'TESTC', compatModel: 'deepseek-chat',
+  ttsProvider: 'azure', azureSpeechKey: 'AZK', azureSpeechRegion: 'eastus', azureVoice: 'uz-UZ-SardorNeural', azureRate: '+10%',
+  pexelsKey: 'PX', pixabayKey: 'PB', openaiKey: '', anthropicKey: '', geminiKey: '', elevenKey: '',
+});
+const azCheck = await verifyKey('azure');
+assert.ok(azCheck.ok, azCheck.detail);
+assert.equal(azCheck.voices[0].locale, 'uz-UZ', 'o‘zbek ovozlari ro‘yxat boshida');
+for (const k of ['compat', 'pexels', 'pixabay']) assert.ok((await verifyKey(k)).ok, `${k} kaliti tekshiruvi`);
+db().settings.compatModel = 'yoq-model';
+assert.equal((await verifyKey('compat')).ok, false, 'ro‘yxatda yo‘q model xato deb ko‘rsatiladi');
+db().settings.compatModel = 'deepseek-chat';
+const { internalUrl } = await import('../src/routes.js');
+assert.ok(internalUrl('http://localhost:11434/v1') && internalUrl('http://169.254.169.254/x') && internalUrl('http://192.168.1.5/v1'));
+assert.ok(!internalUrl('https://api.deepseek.com/v1'));
+
+const stockP = createProject(facts.id, { idea: 'Why cities glow at night', targetMinutes: '1', variant: '1' }, 'long');
+enqueue(stockP.id);
+await waitDone([stockP.id]);
+assert.equal(stockP.status, 'review', stockP.error || stockP.log.map((l) => l.msg).join('\n'));
+const stockScenes = stockP.content.script.scenes;
+assert.equal(stockScenes.length, 4);
+assert.ok(stockScenes.every((x) => /^stock-.*\.mp4$/.test(x.clipFile) && x.clipMeta?.provider), 'har sahnaga stok klip');
+assert.equal(new Set(stockScenes.map((x) => x.clipMeta.id)).size, 4, 'bir klip ikki marta ishlatilmaydi');
+assert.deepEqual(stockScenes[0].keywords, ['city night 1', 'city']);
+assert.ok(stockCalls.some((c) => c.provider === 'pexels' && c.auth === 'PX' && c.orientation === 'landscape' && c.q === 'city night 1'));
+assert.ok(stockCalls.some((c) => c.provider === 'pixabay' && c.key === 'PB'));
+assert.ok(!stockCalls.some((c) => c.file === '/clip/px-4k.mp4'), '4K emas, 1080p fayl yuklanadi');
+assert.ok(!stockP.content.character, 'stok rejimida personaj kerak emas');
+// OpenAI-mos AI: response_format tushunilmasa usiz qayta so'raladi; <think> va ``` javobdan tozalanadi
+assert.ok(compatCalls.length >= 2 && compatCalls.every((c) => c.auth === 'Bearer TESTC' && c.model === 'deepseek-chat'));
+assert.ok(compatCalls[0].response_format && !compatCalls[1].response_format);
+const scriptReq = compatCalls.find((c) => !c.response_format && c.messages[1].content.includes('Write the full video script'));
+assert.match(scriptReq.messages[1].content, /variant #2/, 'variant uchun boshqacha burchak so‘raladi');
+assert.match(scriptReq.messages[1].content, /stock footage/);
+// Azure ovozi: o'zbekcha ovoz, tezlik
+assert.equal(azureCalls.length, 4);
+assert.ok(azureCalls.every((c) => c.key === 'AZK' && c.body.includes("xml:lang='uz-UZ'") && c.body.includes("name='uz-UZ-SardorNeural'") && c.body.includes("rate='+10%'")));
+const stockDir = projectDir(stockP.id);
+const stv = await probe(path.join(stockDir, 'video.mp4'));
+assert.equal(stv.width, 1920);
+assert.equal(stv.height, 1080);
+assert.ok(stv.hasAudio);
+assert.ok(Math.abs(stv.duration - stockScenes.reduce((sum, x) => sum + x.duration, 0)) < 0.5, `stok video davomiyligi: ${stv.duration}`);
+assert.ok(fs.existsSync(path.join(stockDir, 'thumbnail.png')), 'prevyu klip kadridan');
+assert.match(stockP.outputs[0].description, /Pexels/, 'manba tavsifda ko‘rsatiladi');
+const capStyle = fs.readFileSync(path.join(stockDir, 'captions.ass'), 'utf8').split('\n').find((l) => l.startsWith('Style: Cap')).split(',');
+assert.equal(capStyle[2], '55', 'katta subtitr (44 × 1.25)');
+assert.equal(capStyle[3], '&H0000FF00', 'subtitr rangi kanal sozlamasidan');
+assert.equal(capStyle[18], '8', 'subtitr tepada');
+// Kalit so'z o'zgarsa — faqat shu sahnaga yangi klip; ovoz va AI matn keshdan
+const [stockBefore, azBefore, compatBefore] = [stockCalls.length, azureCalls.length, compatCalls.length];
+stockScenes[0].keywords = ['ocean waves'];
+enqueue(stockP.id);
+await waitDone([stockP.id]);
+assert.equal(stockP.status, 'review', stockP.error);
+const newStock = stockCalls.slice(stockBefore);
+assert.ok(newStock.some((c) => c.q === 'ocean waves') && newStock.every((c) => c.provider === 'download' || c.q === 'ocean waves'), `faqat o‘zgargan sahna qidiriladi: ${JSON.stringify(newStock)}`);
+assert.equal(azureCalls.length, azBefore, 'ovoz keshdan');
+assert.equal(compatCalls.length, compatBefore, 'AI matn qayta chaqirilmaydi');
+assert.equal(fs.readdirSync(stockDir).filter((f) => /^stock-.*\.mp4$/.test(f)).length, 4, 'eski klip tozalanadi');
+
+// O'z video kliplari: tayyor materiallar orasida video ham bo'lishi mumkin, stok qidirilmaydi
+const mixed = createProject(facts.id, { idea: 'Own clips', ownScript: 'First line from my own clip.\nSecond line on a picture.' }, 'short');
+const mixDir = projectDir(mixed.id);
+fs.copyFileSync(path.join(TMP, 'fake-clip.mp4'), path.join(mixDir, 'import-img-001.mp4'));
+fs.copyFileSync(path.join(TMP, 'fake-scene.png'), path.join(mixDir, 'import-img-002.png'));
+Object.assign(mixed.inputs, { importImages: ['import-img-001.mp4', 'import-img-002.png'] });
+const stockBeforeMix = stockCalls.length;
+enqueue(mixed.id);
+await waitDone([mixed.id]);
+assert.equal(mixed.status, 'review', mixed.error || mixed.log.map((l) => l.msg).join('\n'));
+assert.ok(mixed.content.script.scenes[0].clipManual && mixed.content.script.scenes[1].imageManual);
+assert.equal(stockCalls.length, stockBeforeMix, 'o‘z materiallari bo‘lsa stok qidirilmaydi');
+const mxv = await probe(path.join(mixDir, 'video.mp4'));
+assert.equal(mxv.width, 1080);
+assert.equal(mxv.height, 1920);
+Object.assign(db().settings, { textProvider: 'anthropic', ttsProvider: 'openai', compatBaseUrl: '', compatKey: '', azureSpeechKey: '', pexelsKey: '', pixabayKey: '' });
+
 function fakeVideosAsSnapshot(d) {
   return d.videos.map((v) => {
     const copy = { ...v };
@@ -556,7 +703,7 @@ assert.ok(music.outputs.every((o) => o.upload.status === 'scheduled'));
 
 const summary = monthSummary();
 assert.equal(summary.fixed, 0, 'yangi o‘rnatishda shaxsiy obunalar yo‘q');
-assert.equal(summary.videos, 13);
+assert.equal(summary.videos, 15);
 
 console.log(`✅ Barcha tekshiruvlar o‘tdi (${((Date.now() - t0) / 1000).toFixed(1)} s montaj).`);
 // KEEP=1 npm test — natijalarni test/.tmp ichida ko'rish uchun saqlab qoladi

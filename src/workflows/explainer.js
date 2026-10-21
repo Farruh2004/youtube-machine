@@ -9,10 +9,11 @@ import { save } from '../store.js';
 import { ffmpeg, probe } from '../media/ffmpeg.js';
 import { buildAss, style, escapeText, assColor } from '../media/ass.js';
 import { generateJson, textProviderReady } from '../ai/llm.js';
-import { synthesize, ttsReady, speechReady, transcribeWords } from '../ai/speech.js';
+import { synthesize, ttsReady, speechReady, transcribeWords, voiceKey, ttsName } from '../ai/speech.js';
 import { generateSceneImage, imageProviderReady } from '../ai/images.js';
 import { characterPrompt, explainerScriptPrompt, annotateScenesPrompt } from '../ai/prompts.js';
 import { ensureBuiltinSfx, resolveSfx, sfxVocabulary, pickMusic } from '../media/sfx.js';
+import { stockReady, pickClip, downloadClip, fallbackKeywords } from '../media/stock.js';
 import { applyMeta, buildDescription, cleanTitle, limitTags, upsertOutput } from './common.js';
 
 export const STEPS = [
@@ -26,6 +27,10 @@ export const STEPS = [
 ];
 
 const isShort = (p) => p.format === 'short';
+const VIDEO_EXT = /\.(mp4|mov|webm|mkv|m4v)$/i;
+// Tasvir manbasi: 'character' — personaj bilan AI rasmlar; 'stock' — Pexels/Pixabay video kliplari
+const visualSource = (project, channel) => project.inputs.visualSource || channel.visualSource || 'character';
+const isStock = (project, channel) => visualSource(project, channel) === 'stock';
 const hash = (s) => crypto.createHash('sha1').update(String(s)).digest('hex').slice(0, 12);
 const WORDS_PER_SEC = 2.5;
 const DEFAULT_VOICE_STYLE = 'Friendly, curious, upbeat explainer narrator. Clear, natural, conversational pacing with tiny pauses for jokes.';
@@ -51,6 +56,7 @@ export function normalizeScene(x = {}) {
     highlight: hl.map((s) => String(s).trim()).filter(Boolean).slice(0, 4),
     sfx: String(x.sfx || '').trim().slice(0, 60),
     voiceStyle: String(x.voiceStyle || '').trim().slice(0, 200),
+    keywords: (Array.isArray(x.keywords) ? x.keywords : String(x.keywords || '').split(',')).map((k) => String(k).trim().slice(0, 80)).filter(Boolean).slice(0, 4),
   };
 }
 
@@ -156,7 +162,8 @@ async function importScenes(ctx) {
   if (!n) n = texts.length;
   const scenes = Array.from({ length: n }, (_, i) => {
     const sc = normalizeScene({ narration: texts[i] || '' });
-    if (imgs[i]) Object.assign(sc, { imageFile: imgs[i], imageManual: true });
+    if (imgs[i] && VIDEO_EXT.test(imgs[i])) Object.assign(sc, { clipFile: imgs[i], clipManual: true });
+    else if (imgs[i]) Object.assign(sc, { imageFile: imgs[i], imageManual: true });
     if (!single && voices[i]) {
       Object.assign(sc, { voiceFile: voices[i], voiceManual: true });
       if (perVoiceWords[i]) Object.assign(sc, { words: perVoiceWords[i], wordsKey: fileKey(dir, voices[i]) });
@@ -164,7 +171,8 @@ async function importScenes(ctx) {
     return sc;
   });
   c.script = { title: project.inputs.idea || project.title, scenes, description: '', tags: [], thumbnailText: '', thumbnailConcept: '', needsAnnotation: true };
-  ctx.log(`Tayyor materiallar: ${imgs.length} ta rasm, ${voices.length} ta ovoz → ${n} ta sahna.`);
+  const clips = imgs.filter((f) => VIDEO_EXT.test(f)).length;
+  ctx.log(`Tayyor materiallar: ${imgs.length - clips} ta rasm, ${clips} ta video, ${voices.length} ta ovoz → ${n} ta sahna.`);
 }
 
 /** Bitta umumiy ovoz faylini sahnalarga taqsimlaydi: so'z vaqtlari bo'lsa — aniq, bo'lmasa — matn uzunligiga qarab. */
@@ -205,6 +213,49 @@ async function splitFullVoice(ctx) {
   ctx.log(`Umumiy ovoz (${Math.round(total)} s) ${scenes.length} ta sahnaga taqsimlandi${words.length ? ' — so‘z vaqtlari bo‘yicha' : ''}.`);
 }
 
+/** Stok rejim: har sahnaga kalit so'zlar bo'yicha Pexels/Pixabay klipi (ovoz uzunligiga yetadigan, takrorlanmaydigan). */
+async function stockScenes(ctx, orientation) {
+  const { project, dir } = ctx;
+  const scenes = project.content.script.scenes;
+  const exists = (f) => f && fs.existsSync(path.join(dir, f));
+  const used = new Set(scenes.map((x) => x.clipMeta?.id).filter(Boolean));
+  let fetched = 0;
+  let manual = 0;
+  for (let i = 0; i < scenes.length; i++) {
+    const sc = scenes[i];
+    if ((sc.clipManual && exists(sc.clipFile)) || (sc.imageManual && exists(sc.imageFile))) {
+      manual++;
+      continue;
+    }
+    sc.clipManual = false;
+    sc.imageManual = false;
+    const queries = [...(sc.keywords?.length ? sc.keywords : fallbackKeywords(sc.narration)), ...fallbackKeywords('', project.inputs.idea || project.title).slice(-1), 'nature landscape'];
+    const key = hash(`${orientation}|${queries.join('|')}|${project.inputs.variant || 0}`);
+    if (sc.clipKey === key && exists(sc.clipFile)) continue;
+    if (!stockReady()) throw new Error('Stok video uchun Pexels yoki Pixabay kaliti kerak (ikkalasi ham bepul) — API kalitlar sahifasida kiriting.');
+    if (sc.clipMeta?.id) used.delete(sc.clipMeta.id);
+    const need = Math.max(3, (sc.voiceDuration || 3) + 0.4);
+    const clip = await pickClip({ queries, orientation, minDuration: need, used, seed: `${project.id}|${project.inputs.variant || 0}|${i}` });
+    if (!clip) throw new Error(`${i + 1}-sahna uchun video topilmadi (“${queries[0]}”). Sahnaning kalit so‘zlarini o‘zgartiring yoki o‘z videongizni qo‘ying.`);
+    const file = `stock-${hash(`${clip.id}|${clip.link}`)}.mp4`;
+    if (!exists(file)) await downloadClip(clip, path.join(dir, file));
+    Object.assign(sc, { clipFile: file, clipKey: key, imageFile: null, clipMeta: { provider: clip.provider, id: clip.id, page: clip.page, author: clip.author, query: clip.query } });
+    used.add(clip.id);
+    fetched++;
+    ctx.progress(Math.round(((i + 1) / scenes.length) * 100));
+    save();
+  }
+  removeStale(dir, 'stock-', '.mp4', scenes.map((x) => x.clipFile));
+  // Manbani ko'rsatish (Pexels/Pixabay tavsiyasi): tavsif oxiriga
+  const providers = [...new Set(scenes.map((x) => x.clipMeta?.provider).filter(Boolean))];
+  const out = project.outputs.find((o) => o.id === 'main');
+  if (providers.length && out && !out.metaManual) {
+    const line = `🎞 Video: ${providers.join(', ')}`;
+    if (!out.description.includes(line)) out.description = `${out.description.trim()}\n\n${line}`.slice(0, 5000);
+  }
+  ctx.log(`${fetched ? `${fetched} ta stok video olindi (${providers.join(', ')})` : 'Stok videolar keshdan olindi'}${manual ? `, ${manual} ta — o‘zingiz yuklagan` : ''}.`);
+}
+
 export const run = {
   async prepare(ctx) {
     const { project, channel, dir } = ctx;
@@ -213,6 +264,12 @@ export const run = {
       : channel.characterFile
         ? path.join(channelDir(channel.id), channel.characterFile)
         : null;
+    if (isStock(project, channel) && !project.inputs.characterFile) {
+      fs.rmSync(path.join(dir, 'character.png'), { force: true });
+      project.content.character = null;
+      ctx.log('Stok video rejimi — kadrlar Pexels/Pixabay’dan olinadi, personaj kerak emas.');
+      return;
+    }
     if (!src || !fs.existsSync(src)) {
       // Tayyor rasmlar berilgan bo'lsa, personaj shart emas
       if (project.inputs.importImages?.length) {
@@ -272,7 +329,7 @@ export const run = {
       if (!textProviderReady()) throw new Error('Ssenariy yozish uchun matn AI kaliti kerak (API kalitlar) — yoki “O‘z ssenariyim” maydoniga matn yozing.');
       const seconds = isShort(project) ? Math.min(170, Number(project.inputs.targetSeconds) || 50) : Math.round((Number(project.inputs.targetMinutes) || 4) * 60);
       const r = await generateJson({
-        ...explainerScriptPrompt({ channel, project, seconds, sceneSeconds, character: c.character?.description, sfxNames: sfxVocabulary() }),
+        ...explainerScriptPrompt({ channel, project, seconds, sceneSeconds, character: c.character?.description, sfxNames: sfxVocabulary(), stock: isStock(project, channel) }),
         maxTokens: 8000,
         cost: ctx.costMeta,
       });
@@ -285,12 +342,12 @@ export const run = {
       delete c.script.needsAnnotation;
       if (textProviderReady() && c.script.scenes.some((x) => x.narration)) {
         try {
-          const r = await generateJson({ ...annotateScenesPrompt({ channel, project, scenes: c.script.scenes, sfxNames: sfxVocabulary() }), maxTokens: 4000, cost: ctx.costMeta });
+          const r = await generateJson({ ...annotateScenesPrompt({ channel, project, scenes: c.script.scenes, sfxNames: sfxVocabulary(), stock: isStock(project, channel) }), maxTokens: 4000, cost: ctx.costMeta });
           (r.scenes || []).forEach((x, i) => {
             const sc = c.script.scenes[i];
             if (!sc) return;
             const n = normalizeScene({ ...x, narration: sc.narration });
-            Object.assign(sc, { label: n.label, highlight: n.highlight, sfx: n.sfx });
+            Object.assign(sc, { label: n.label, highlight: n.highlight, sfx: n.sfx, ...(n.keywords.length ? { keywords: n.keywords } : {}) });
           });
           for (const k of ['title', 'thumbnailText', 'thumbnailConcept', 'description', 'hashtags', 'tags']) if (r[k]) c.script[k] = r[k];
           c.script.sfxChosen = true;
@@ -321,7 +378,7 @@ export const run = {
       await splitFullVoice(ctx);
       return;
     }
-    const voiceId = settings.ttsProvider === 'elevenlabs' ? `eleven:${settings.elevenVoiceId}` : settings.ttsProvider === 'gemini' ? `gemini:${settings.geminiVoice}` : `openai:${settings.ttsVoice}`;
+    const voiceId = voiceKey(settings);
     const canSpeak = ttsReady();
     const needWords = wantCaptions(project, channel) && speechReady() && channel.captionTiming !== 'estimate';
     if (!canSpeak && !scenes.every((sc) => sc.voiceManual)) ctx.log('Ovoz kaliti yo‘q — sahnalar matn uzunligiga qarab vaqtlanadi, video ovozsiz chiqadi.');
@@ -360,7 +417,7 @@ export const run = {
     }
     removeStale(dir, 'voice-', '.mp3', scenes.map((x) => x.voiceFile));
     const total = scenes.reduce((s, x) => s + x.voiceDuration, 0);
-    ctx.log(`Ovoz: ${scenes.length} ta sahna, jami ~${Math.round(total)} s.`);
+    ctx.log(`Ovoz (${ttsName(settings)}): ${scenes.length} ta sahna, jami ~${Math.round(total)} s.`);
     if (isShort(project) && total > 175) ctx.log('Diqqat: Shorts 3 daqiqadan oshmasligi kerak — matnni qisqartiring.');
   },
 
@@ -368,6 +425,10 @@ export const run = {
     const { project, channel, dir } = ctx;
     const scenes = project.content.script.scenes;
     const orientation = isShort(project) ? 'portrait' : 'landscape';
+    if (isStock(project, channel)) {
+      await stockScenes(ctx, orientation);
+      return;
+    }
     const canDraw = imageProviderReady();
     const hasCharacter = fs.existsSync(path.join(dir, 'character.png'));
     if (!canDraw && scenes.some((sc) => !sc.imageManual)) ctx.log('Rasm yaratish kaliti yo‘q — sahnalarda personajning o‘zi ishlatiladi.');
@@ -375,11 +436,13 @@ export const run = {
     let manual = 0;
     for (let i = 0; i < scenes.length; i++) {
       const sc = scenes[i];
-      if (sc.imageManual && sc.imageFile && fs.existsSync(path.join(dir, sc.imageFile))) {
+      if ((sc.imageManual && sc.imageFile && fs.existsSync(path.join(dir, sc.imageFile))) || (sc.clipManual && sc.clipFile && fs.existsSync(path.join(dir, sc.clipFile)))) {
         manual++;
         continue;
       }
       sc.imageManual = false;
+      sc.clipManual = false;
+      sc.clipFile = null;
       if (!hasCharacter) throw new Error(`${i + 1}-sahnaga rasm yo‘q. Shu sahnaga rasm yuklang yoki kanalga personaj rasmini qo‘shing.`);
       const prompt = scenePrompt({ visual: sc.visual || defaultVisual(sc.narration), character: project.content.character?.description, channel, orientation });
       const key = hash(`${orientation}|${canDraw}|${prompt}`);
@@ -397,20 +460,27 @@ export const run = {
       save();
     }
     removeStale(dir, 'scene-', '.png', scenes.map((x) => x.imageFile));
+    removeStale(dir, 'stock-', '.mp4', scenes.map((x) => x.clipFile));
     ctx.log(`${made ? `${made} ta sahna rasmi yaratildi` : 'Yangi rasm kerak bo‘lmadi'}${manual ? `, ${manual} ta — o‘zingiz yuklagan` : ''}.`);
   },
 
   async thumbnail(ctx) {
     const { project, channel, settings, dir } = ctx;
     const sc = project.content.script;
-    const canDraw = imageProviderReady() && fs.existsSync(path.join(dir, 'character.png'));
-    const key = canDraw && sc.thumbnailConcept ? hash(`${sc.thumbnailConcept}|ai`) : hash(`scene|${sc.scenes[0].imageFile}`);
+    const canDraw = !isStock(project, channel) && imageProviderReady() && fs.existsSync(path.join(dir, 'character.png'));
+    const first = sc.scenes[0];
+    const key = canDraw && sc.thumbnailConcept ? hash(`${sc.thumbnailConcept}|ai`) : hash(`scene|${first.clipFile || first.imageFile}`);
     if (!(project.content.thumbKey === key && fs.existsSync(path.join(dir, 'thumb-art.png')))) {
       if (canDraw && sc.thumbnailConcept) {
         const prompt = `${scenePrompt({ visual: `${sc.thumbnailConcept}. Big expressive emotion, very clear silhouette, leave the top 30% empty for a headline.`, character: project.content.character?.description, channel, orientation: 'landscape' })}\nThis is a YouTube thumbnail: maximum clarity at small size.`;
         await generateSceneImage({ prompt, referenceFiles: [path.join(dir, 'character.png')], orientation: 'landscape', outFile: path.join(dir, 'thumb-art.png'), cost: ctx.costMeta });
       } else {
-        await ffmpeg(['-i', sc.scenes[0].imageFile, '-frames:v', '1', '-y', 'thumb-art.png'], { cwd: dir });
+        if (first.clipFile) {
+          // Klipning 1-soniyasidagi kadr (juda qisqa klipda — birinchi kadr)
+          fs.rmSync(path.join(dir, 'thumb-art.png'), { force: true });
+          await ffmpeg(['-ss', '1', '-i', first.clipFile, '-frames:v', '1', '-y', 'thumb-art.png'], { cwd: dir }).catch(() => {});
+          if (!fs.existsSync(path.join(dir, 'thumb-art.png'))) await ffmpeg(['-i', first.clipFile, '-frames:v', '1', '-y', 'thumb-art.png'], { cwd: dir });
+        } else await ffmpeg(['-i', first.imageFile, '-frames:v', '1', '-y', 'thumb-art.png'], { cwd: dir });
       }
       project.content.thumbKey = key;
     }
@@ -455,6 +525,19 @@ export const run = {
       const D = sc.duration.toFixed(3);
       const ease = i % 2 ? `(1-t/${D})` : `(t/${D})`;
       const segment = `seg-${i + 1}.mp4`;
+      const fadeD = Math.min(0.3, sc.duration / 4).toFixed(2);
+      const trans = channel.transition === 'fade' ? `,fade=t=in:st=0:d=${fadeD}:color=${sc.clipFile ? 'black' : bgColor(channel)},fade=t=out:st=${(sc.duration - fadeD).toFixed(3)}:d=${fadeD}:color=${sc.clipFile ? 'black' : bgColor(channel)}` : '';
+      if (sc.clipFile && fs.existsSync(path.join(dir, sc.clipFile))) {
+        // Video klip: kadrni to'ldiradi, qisqa bo'lsa takrorlanadi, o'z ovozi o'chiriladi
+        await ffmpeg([
+          '-stream_loop', '-1', '-i', sc.clipFile, '-t', D,
+          '-vf', `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=30${trans},format=yuv420p`,
+          '-c:v', 'libx264', '-preset', settings.renderPreset, '-crf', '20', '-r', '30', '-an', segment,
+        ], { cwd: dir });
+        list.push(`file '${segment}'`);
+        ctx.progress(Math.round(((i + 1) / scenes.length) * 65));
+        continue;
+      }
       // Nisbat yaqin bo'lsa (masalan 2:3 rasm 9:16 kadrda) — kadrni to'ldiradi (chetlari biroz kesiladi), aks holda fon bilan to'ldiriladi
       const img = await probe(path.join(dir, sc.imageFile));
       const ratio = img.width && img.height ? img.width / img.height / (W / H) : 1;
@@ -463,7 +546,7 @@ export const run = {
         : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${bgColor(channel)}`;
       await ffmpeg([
         '-loop', '1', '-framerate', '30', '-t', D, '-i', sc.imageFile,
-        '-vf', `${fit},scale=${ZW}:${ZH},crop=${W}:${H}:x='${dx}+${i % 3 === 2 ? 0 : dx}*(${ease}-0.5)':y='${dy}+${dy}*(${ease}-0.5)',setsar=1,format=yuv420p`,
+        '-vf', `${fit},scale=${ZW}:${ZH},crop=${W}:${H}:x='${dx}+${i % 3 === 2 ? 0 : dx}*(${ease}-0.5)':y='${dy}+${dy}*(${ease}-0.5)',setsar=1${trans},format=yuv420p`,
         '-c:v', 'libx264', '-preset', settings.renderPreset, '-crf', '20', '-r', '30', '-an', segment,
       ], { cwd: dir });
       list.push(`file '${segment}'`);
@@ -562,6 +645,14 @@ const plain = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 export function captionsAss({ scenes, channel, settings, short, W, H, total, withCaptions }) {
   const pill = (channel.captionStyle || 'pill') === 'pill';
   const labels = channel.sceneLabels !== false;
+  // Subtitr ko'rinishi: kanal sozlamalaridan (joy, o'lcham, ranglar)
+  const textColor = channel.captionColor || '#ffffff';
+  const hlColor = channel.highlightColor || '#ffd400';
+  const boxColor = channel.captionBg || '#1d2230';
+  const scale = { small: 0.8, medium: 1, large: 1.25 }[channel.captionSize] || 1;
+  const pos = channel.captionPosition || 'bottom';
+  const align = pos === 'top' ? 8 : pos === 'middle' ? 5 : 2;
+  const marginFor = (bottomV) => (pos === 'top' ? (short ? 300 : 110) : pos === 'middle' ? 0 : bottomV);
   const events = [];
   scenes.forEach((sc, si) => {
     if (labels && sc.label) {
@@ -588,7 +679,7 @@ export function captionsAss({ scenes, channel, settings, short, W, H, total, wit
       const end = k + 1 < chunks.length ? sc.start + startOf(chunks[k + 1][0]) : sc.start + span + 0.15;
       const text = idxs.map((i) => {
         const w = words[i];
-        if (hl.has(plain(w))) return `{\\c${assColor('#ffd400')}&}${escapeText(w.toUpperCase())}{\\c${assColor('#ffffff')}&}`;
+        if (hl.has(plain(w))) return `{\\c${assColor(hlColor)}&}${escapeText(w.toUpperCase())}{\\c${assColor(textColor)}&}`;
         return escapeText(pill || !short ? w : w.toUpperCase());
       }).join(' ');
       events.push({ start, end: Math.max(start + 0.2, end), style: 'Cap', text, raw: true });
@@ -598,10 +689,10 @@ export function captionsAss({ scenes, channel, settings, short, W, H, total, wit
   const font = settings.fontName;
   const styles = [
     pill
-      ? style({ name: 'Cap', font, size: short ? 60 : 44, color: '#ffffff', back: '#1d2230', backAlpha: 0, boxed: true, outlineWidth: short ? 14 : 11, align: 2, marginV: short ? 400 : 70, marginH: short ? 90 : 240 })
+      ? style({ name: 'Cap', font, size: Math.round((short ? 60 : 44) * scale), color: textColor, back: boxColor, backAlpha: 0, boxed: true, outlineWidth: short ? 14 : 11, align, marginV: marginFor(short ? 400 : 70), marginH: short ? 90 : 240 })
       : short
-        ? style({ name: 'Cap', font, size: 78, color: '#ffffff', outline: '#000000', outlineWidth: 7, shadow: 2, align: 2, marginV: 420, marginH: 70 })
-        : style({ name: 'Cap', font, size: 50, color: '#ffffff', back: '#000000', backAlpha: 80, boxed: true, outlineWidth: 10, align: 2, marginV: 50, marginH: 200 }),
+        ? style({ name: 'Cap', font, size: Math.round(78 * scale), color: textColor, outline: '#000000', outlineWidth: 7, shadow: 2, align, marginV: marginFor(420), marginH: 70 })
+        : style({ name: 'Cap', font, size: Math.round(50 * scale), color: textColor, back: '#000000', backAlpha: 80, boxed: true, outlineWidth: 10, align, marginV: marginFor(50), marginH: 200 }),
     style({ name: 'Label', font, size: short ? 50 : 38, color: '#ffffff', back: LABEL_COLORS[0], backAlpha: 0, boxed: true, outlineWidth: short ? 12 : 9, align: 8, marginV: short ? 150 : 34, marginH: 60 }),
     style({ name: 'Brand', font, size: short ? 28 : 24, color: '#666666', outline: '#ffffff', outlineWidth: 2, bold: false, align: short ? 2 : 9, marginV: short ? 70 : 24, marginH: 30 }),
   ];

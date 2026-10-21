@@ -11,8 +11,12 @@ export function textProviderReady() {
   if (s.textProvider === 'anthropic') return Boolean(s.anthropicKey);
   if (s.textProvider === 'openai') return Boolean(s.openaiKey);
   if (s.textProvider === 'gemini') return Boolean(s.geminiKey);
+  // OpenAI bilan mos API (DeepSeek, OpenRouter, Groq, Ollama...): kalit ixtiyoriy — Ollama'da kerak emas
+  if (s.textProvider === 'compat') return Boolean(s.compatBaseUrl && s.compatModel);
   return false;
 }
+
+export const compatBase = (url) => String(url || '').trim().replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
 
 /**
  * Matn modelidan JSON javob oladi. Kalit sozlanmagan bo'lsa yoki byudjet tugagan bo'lsa xato beradi —
@@ -78,6 +82,8 @@ export async function generateJson({ system, prompt, maxTokens = 2500, cost = {}
     outputTokens = (data.usageMetadata?.candidatesTokenCount || 0) + (data.usageMetadata?.thoughtsTokenCount || 0);
     if (!cand || ['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST'].includes(cand.finishReason)) stopError = 'Gemini: so‘rov rad etildi';
     if (cand?.finishReason === 'MAX_TOKENS') stopError = 'Gemini: javob uzunlik chegarasida kesildi';
+  } else if (s.textProvider === 'compat') {
+    ({ text, inputTokens, outputTokens, stopError } = await compatChat(s, { system, prompt, maxTokens, images }));
   } else {
     const res = await fetch(`${OPENAI_BASE}/v1/chat/completions`, {
       method: 'POST',
@@ -114,6 +120,55 @@ export async function generateJson({ system, prompt, maxTokens = 2500, cost = {}
   // Rad etilgan yoki kesilgan javob ham pul sarflaydi — xarajat yozilgandan keyin xato beramiz
   if (stopError) throw new Error(stopError);
   return extractJson(text);
+}
+
+/**
+ * OpenAI bilan mos har qanday xizmat. Ba'zilari response_format'ni bilmaydi (400 qaytaradi) —
+ * shunda bir marta usiz qayta so'raymiz, JSON'ni matndan ajratib olamiz.
+ */
+async function compatChat(s, { system, prompt, maxTokens, images }) {
+  const messages = [
+    { role: 'system', content: `${system}\nReply with a single valid JSON object and nothing else.` },
+    {
+      role: 'user',
+      content: images.length
+        ? [...images.map((im) => ({ type: 'image_url', image_url: { url: `data:${im.mediaType};base64,${im.data}` } })), { type: 'text', text: prompt }]
+        : prompt,
+    },
+  ];
+  const headers = { 'content-type': 'application/json', ...(s.compatKey ? { authorization: `Bearer ${s.compatKey}` } : {}) };
+  const base = compatBase(s.compatBaseUrl);
+  const send = (jsonMode) =>
+    fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal: AbortSignal.timeout(300_000),
+      body: JSON.stringify({
+        model: s.compatModel,
+        max_tokens: Math.max(maxTokens, 4096),
+        messages,
+        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+      }),
+    });
+  let res;
+  try {
+    res = await send(true);
+    if (res.status === 400 || res.status === 422) res = await send(false);
+  } catch (err) {
+    if (err.message !== 'fetch failed') throw err;
+    throw new Error(`AI manziliga ulanib bo‘lmadi (${base}). Ollama bo‘lsa — u ishga tushirilganini tekshiring.`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`AI (${s.compatModel}): ${data.error?.message || data.message || data.error || res.status}`);
+  const choice = data.choices?.[0];
+  // Fikrlaydigan modellar (DeepSeek R1, Qwen) javob oldidan <think>...</think> yozadi
+  const text = String(choice?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '');
+  return {
+    text,
+    inputTokens: data.usage?.prompt_tokens || 0,
+    outputTokens: data.usage?.completion_tokens || 0,
+    stopError: choice?.finish_reason === 'length' ? 'AI: javob uzunlik chegarasida kesildi' : !choice ? 'AI: bo‘sh javob' : null,
+  };
 }
 
 /** Rasmni (masalan, YouTube prevyusini) AI'ga yuborish uchun yuklab oladi. */

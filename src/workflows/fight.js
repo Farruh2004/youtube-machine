@@ -5,7 +5,7 @@ import { ffmpeg, probe, loudnessCurve } from '../media/ffmpeg.js';
 import { motionProfile, findKeyMoment, cropPath, cropCommands } from '../media/motion.js';
 import { buildAss, style, assColor } from '../media/ass.js';
 import { generateJson, textProviderReady } from '../ai/llm.js';
-import { synthesize, ttsReady } from '../ai/speech.js';
+import { synthesize, ttsReady, voiceKey, ttsName } from '../ai/speech.js';
 import { fightScriptPrompt, fightScriptFallback } from '../ai/prompts.js';
 import { applyMeta, buildDescription, cleanTitle, limitTags, upsertOutput } from './common.js';
 
@@ -176,7 +176,7 @@ export const run = {
     const { project, dir, settings } = ctx;
     const c = project.content;
     const out = path.join(dir, 'voice.mp3');
-    const voiceId = settings.ttsProvider === 'elevenlabs' ? `eleven:${settings.elevenVoiceId}` : `openai:${settings.ttsVoice}`;
+    const voiceId = voiceKey(settings);
     const source = project.inputs.voiceFile ? `file:${project.inputs.voiceFile}` : `tts:${voiceId}:${c.narration || ''}`;
     if (fs.existsSync(out) && c.voiceSource === source && !c.regenerate) {
       ctx.log('Matn o‘zgarmagan — oldingi ovoz ishlatildi.');
@@ -188,7 +188,7 @@ export const run = {
         c.voiceSource = source;
         ctx.log('Siz yuklagan ovoz ishlatildi.');
       } else if (c.narration && ttsReady()) {
-        ctx.log(`Diktor ovozi yaratilmoqda (${settings.ttsProvider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI TTS'})…`);
+        ctx.log(`Diktor ovozi yaratilmoqda (${ttsName(settings)})…`);
         try {
           await synthesize(c.narration, out, {
             instructions: 'Energetic, confident combat-sports analyst. Clear American English, punchy pacing, no shouting.',

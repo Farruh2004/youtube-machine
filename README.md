@@ -15,7 +15,8 @@ Tashqi kutubxonalarga bog‘liq emas. API kalitlaringiz, kanallaringiz va videol
 |---|---|---|
 | 🎵 **Musiqa kanali** | Suno qo‘shig‘i (MP3/WAV), matni, muqova va fon videosi (ixtiyoriy) | Fon (sekin suzuvchi rasm yoki takrorlanuvchi video) → qo‘shiq matnini vaqtlash → **karaoke** uslubidagi **1920×1080 lyric video** + inglizcha **tarjima qatori** → qo‘shiqning eng kuchli joylaridan **3 tagacha 1080×1920 Shorts** → prevyu → SEO |
 | 🥊 **Jang tahlili kanali** | Jang lavhasi yoki **to‘liq jang videosi**, jangchilar va faktlar | Muhim lahzani topish → **to‘xtash + yaqinlashtirish + aylana belgi + sekin takror** → inglizcha **original tahlil** → diktor ovozi (OpenAI yoki **o‘z ovozingiz klon**i, ElevenLabs) → subtitrlar → harakatga ergashadigan **vertikal Shorts** yoki gorizontal video → prevyu → SEO |
-| 🎬 **Tushuntiruvchi kanal** | Personaj rasmi + bir jumlalik g‘oya (yoki o‘zingiz yasagan rasmlar va ovoz) | Ssenariy → sahna-sahna personajli rasmlar → ovoz (OpenAI, ElevenLabs yoki Google AI Studio) → rangli yorliqlar, sariq kalit so‘zli subtitrlar, ovoz effektlari, fon musiqasi → prevyu → SEO |
+| 🎬 **Tushuntiruvchi kanal** | Personaj rasmi + bir jumlalik g‘oya (yoki o‘zingiz yasagan rasmlar, video kliplar va ovoz) | Ssenariy → sahna-sahna personajli rasmlar → ovoz (OpenAI, ElevenLabs, Google AI Studio yoki Azure) → rangli yorliqlar, sariq kalit so‘zli subtitrlar, ovoz effektlari, fon musiqasi → prevyu → SEO |
+| 📹 **Stok video kanali** | Bir jumlalik g‘oya | Ssenariy → har sahnaga Pexels/Pixabay’dan mos HD klip → ovoz → subtitr (joyi, o‘lchami, rangi sozlanadi), silliq o‘tishlar, musiqa → prevyu → SEO. Bir mavzudan 5 tagacha variant |
 
 Umumiy imkoniyatlar:
 - 📊 **Boshqaruv paneli** — sozlash holati, oylik xarajat, ko‘rib chiqish kutayotgan videolar, kanallarning keyingi bo‘sh sloti.
@@ -99,9 +100,12 @@ kalit qayerdan olinishi bo‘yicha qadamlar, kalit maydoni va **“Saqlash va te
 | **OpenAI** | Diktor ovozi (TTS), qo‘shiq matnini vokalga moslab vaqtlash (Whisper) | platform.openai.com → API keys |
 | **Google Gemini** (ixtiyoriy) | Matn uchun Claude/OpenAI o‘rniga (bepul limiti bor) | aistudio.google.com/apikey |
 | **ElevenLabs** (ixtiyoriy) | O‘z ovozingiz kloni bilan diktor | elevenlabs.io → Voices → Instant Voice Clone → Voice ID; Profile → API key |
+| **Azure Speech** (ixtiyoriy, bepul) | Microsoft ovozlari (o‘zbekcha ham): oyiga 500 ming belgi bepul | portal.azure.com → Speech service → Free F0 → Keys and Endpoint |
+| **Boshqa AI** (ixtiyoriy) | DeepSeek, OpenRouter, Groq, Qwen, Kimi, Mistral yoki kompyuterdagi Ollama — matn uchun | Xizmat sayti → API key (Ollama’da kerak emas) |
+| **Pexels / Pixabay** (ixtiyoriy, bepul) | Stok video kanallari uchun HD kliplar | pexels.com/api, pixabay.com/api/docs |
 | **GitHub token** | `yangilash.bat` uchun (yopiq repozitoriy) | github.com/settings/personal-access-tokens/new |
 
-API kalitlar sahifasining pastida **“Boshqa API kalitlar”** bo‘limi bor: Suno, Kling, Runway, Pexels va boshqa xizmatlarning kalitlarini
+API kalitlar sahifasining pastida **“Boshqa API kalitlar”** bo‘limi bor: Suno, Kling, Runway va boshqa xizmatlarning kalitlarini
 bir joyda saqlab qo‘yish mumkin. Dastur ulardan hozircha foydalanmaydi — kerakli xizmat integratsiyasi alohida qo‘shiladi.
 
 ### Telegram bot (ixtiyoriy, tavsiya etiladi)
@@ -202,6 +206,28 @@ Bunda HTTPS uchun Caddy yoki Cloudflare Tunnel qo‘yish tavsiya etiladi. Parols
 
 ---
 
+## Stok video kanali (MoneyPrinterTurbo uslubi)
+
+Personaj chizish shart bo‘lmagan kanallar uchun (faktlar, top-10, motivatsiya, tarix): har sahnaga **Pexels** yoki **Pixabay**’dan
+mavzuga mos HD video klip olinadi. Ikkala xizmat ham bepul, kliplardan tijoriy foydalanish mumkin (manba tavsifga o‘zi yoziladi).
+
+1. **API kalitlar** → Pexels yoki Pixabay kalitini kiriting (ikkalasi bo‘lsa, tanlov ko‘payadi).
+2. **Sozlamalar → ➕ Yangi kanal** → turi “📹 Stok video”. Yoki mavjud tushuntiruvchi kanalda “Sahna tasvirlari” → *Stok videolar*.
+   Yangi video formasida ham har video uchun alohida tanlash mumkin.
+3. AI ssenariy bilan birga har sahna uchun inglizcha qidiruv so‘zlarini yozadi; dastur ovoz uzunligiga yetadigan, takrorlanmaydigan klip tanlaydi.
+   Loyiha sahifasida sahnaning **qidiruv so‘zlarini** o‘zgartirsangiz — faqat shu sahnaga yangi klip topiladi. 🖼 tugmasi bilan o‘z videongizni ham qo‘yasiz.
+
+Qo‘shimcha imkoniyatlar (barcha tushuntiruvchi kanallarda):
+- **Variantlar:** Yangi video → “Nechta variant” (1–5) — bir mavzudan har biri boshqa boshlanish va burchakli bir nechta video.
+- **Subtitr ko‘rinishi:** kanal sozlamasida joyi (past / o‘rta / tepa), o‘lchami va uchta rangi (matn, kalit so‘z, fon).
+- **O‘tishlar:** sahnalar orasida silliq (fade) almashinish.
+- **Azure Speech ovozi:** API kalitlar → “Diktor ovozi” → *Azure Speech*. 400+ ovoz, jumladan o‘zbekcha (Madina, Sardor) va har tilda
+  gapiradigan “Multilingual” ovozlar; tezlikni tanlash mumkin. Bu — Edge brauzeridagi ovozlarning rasmiy, ruxsat etilgan yo‘li.
+- **Boshqa AI:** API kalitlar → “Boshqa AI” kartasidagi tugmalar (DeepSeek, OpenRouter, Groq, Ollama…) manzilni o‘zi yozadi; kalitni qo‘ying,
+  modelni ro‘yxatdan tanlang va “Matn” uchun *Boshqa AI*’ni belgilang. Ollama kompyuterda bepul ishlaydi (saytda ishlamaydi).
+
+Eng arzon to‘plam: **Gemini** yoki **DeepSeek** (matn) + **Azure Speech** (ovoz, bepul) + **Pexels** (video, bepul) — 4 daqiqalik video bir necha sent turadi.
+
 ## Xarajat taxmini (oyiga 60 ta video)
 
 | Xizmat | Bir videoga (taxminan) | Oyiga |
@@ -246,8 +272,8 @@ youtube-machine/
 │   ├── keys.js            # API kalitlarini tekshirish
 │   ├── telegram.js        # Telegram bot
 │   ├── events.js          # Ichki hodisalar
-│   ├── ai/                # Matn (Claude/OpenAI), ovoz (TTS), Whisper, ko‘rsatmalar
-│   ├── media/             # ffmpeg, ASS subtitrlar/karaoke, qo‘shiq matni vaqtlari, harakat tahlili
+│   ├── ai/                # Matn (Claude/OpenAI/Gemini/OpenAI-mos), ovoz (OpenAI, ElevenLabs, Gemini, Azure), Whisper, ko‘rsatmalar
+│   ├── media/             # ffmpeg, ASS subtitrlar/karaoke, qo‘shiq matni vaqtlari, harakat tahlili, stok video (Pexels/Pixabay)
 │   └── workflows/         # music.js (musiqa), fight.js (jang tahlili), explainer.js (tushuntiruvchi)
 ├── test/smoke.js          # To‘liq montaj testi (ikkala kanal, lavha topish, Telegram)
 ├── Dockerfile, docker-compose.yml
